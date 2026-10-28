@@ -105,10 +105,11 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
+// 默认展示 API 密钥登录，只有从管理端页面跳转时才切到管理员登录
 function normalizeRealm(value: unknown): LoginRealm {
-  return value === 'key'
-    ? 'key'
-    : 'admin'
+  return value === 'admin'
+    ? 'admin'
+    : 'key'
 }
 
 function resolveDestination(): string {

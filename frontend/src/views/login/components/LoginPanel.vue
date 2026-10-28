@@ -29,14 +29,14 @@ const apiKey = defineModel<string>('apiKey', { required: true })
 
 const realmOptions = computed(() => ([
   {
-    label: t('auth.adminSignIn'),
-    value: 'admin',
-    icon: ShieldCheck,
-  },
-  {
     label: t('auth.apiKeySignIn'),
     value: 'key',
     icon: KeyRound,
+  },
+  {
+    label: t('auth.adminSignIn'),
+    value: 'admin',
+    icon: ShieldCheck,
   },
 ]))
 
