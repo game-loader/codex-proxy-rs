@@ -8,7 +8,7 @@ import { t } from '@/i18n'
 import { notification as ZNotification } from '@/utils/notification'
 import { accountModelAccessError } from '../utils/modelAccess'
 import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
-import { apiKeyAccountError, emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
+import { apiKeyAccountError, emptyApiKeyAccountForm, isEditableApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
 
 export function useAccountEditor(options: {
   reloadAccounts: () => Promise<unknown>
@@ -82,7 +82,7 @@ export function useAccountEditor(options: {
     }
     selectedGroupIds.value = account.groups.map(group => group.id)
     showEditModal.value = true
-    if (isOpenAiApiKeyAccount(account) || isOpenAiOAuthAccount(account))
+    if (isEditableApiKeyAccount(account) || isOpenAiOAuthAccount(account))
       void loadConfiguration(account.id)
   }
 
@@ -90,7 +90,7 @@ export function useAccountEditor(options: {
     const accountId = editingAccount.value?.id
     if (!accountId || saving.value)
       return
-    const isApiKey = isOpenAiApiKeyAccount(editingAccount.value)
+    const isApiKey = isEditableApiKeyAccount(editingAccount.value)
     const isOAuth = isOpenAiOAuthAccount(editingAccount.value)
     const configuration = isApiKey && configurationReady.value
       ? parseApiKeyConfiguration(apiKey.value)

@@ -4,7 +4,7 @@ import type { ClientProfileSelection, ProviderRequestProfile, ProviderRequestPro
 import { ZSegmented } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { formatProviderLabel, PROVIDER_IDS, providerIcon } from '@/utils/providers'
+import { CLIENT_PROFILE_PROVIDER_IDS, formatProviderLabel, providerIcon } from '@/utils/providers'
 import ClientProfileEditor from './ClientProfileEditor.vue'
 import XaiClientProfileEditor from './XaiClientProfileEditor.vue'
 
@@ -21,8 +21,8 @@ withDefaults(defineProps<{
 const { t } = useI18n({ useScope: 'global' })
 
 const model = defineModel<ProviderRequestProfiles>({ required: true })
-const provider = shallowRef<(typeof PROVIDER_IDS)[number]>('openai')
-const providerOptions = PROVIDER_IDS.map(value => ({
+const provider = shallowRef<(typeof CLIENT_PROFILE_PROVIDER_IDS)[number]>('openai')
+const providerOptions = CLIENT_PROFILE_PROVIDER_IDS.map(value => ({
   value,
   label: formatProviderLabel(value),
   icon: providerIcon(value),

@@ -6,7 +6,7 @@ import { ZFormItem, ZInput, ZSegmented } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-defineProps<{ disabled?: boolean, editing?: boolean }>()
+withDefaults(defineProps<{ disabled?: boolean, editing?: boolean, showTransport?: boolean }>(), { showTransport: true })
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -34,7 +34,7 @@ const transportOptions = computed(() => ([
     <ZFormItem :label="t('common.fields.apiKey')" :required="!editing">
       <ZInput v-model="form.apiKey" type="password" :placeholder="editing ? t('accounts.credentials.apiKeyPlaceholder') : t('accounts.credentials.enterUpstreamKey')" :disabled="disabled" autocomplete="new-password" />
     </ZFormItem>
-    <ZFormItem :label="t('accounts.credentials.transportLabel')">
+    <ZFormItem v-if="showTransport" :label="t('accounts.credentials.transportLabel')">
       <ZSegmented v-model="form.transport" :aria-label="t('accounts.credentials.transportLabel')" :options="transportOptions" :disabled="disabled" :title="t('accounts.credentials.webSocketHelp')" />
     </ZFormItem>
   </div>

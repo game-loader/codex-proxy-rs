@@ -5,6 +5,16 @@ export function isOpenAiApiKeyAccount(account: Pick<Account, 'provider' | 'authe
   return account?.provider === 'openai' && account.authenticationKind === 'api_key'
 }
 
+/** 只有地址和密钥的中转账号；连接只走 HTTP/SSE */
+export function isRelayApiKeyAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
+  return account?.provider === 'newapi' && account.authenticationKind === 'api_key'
+}
+
+/** 可在编辑弹窗修改地址与密钥的账号 */
+export function isEditableApiKeyAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
+  return isOpenAiApiKeyAccount(account) || isRelayApiKeyAccount(account)
+}
+
 export function isOpenAiOAuthAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
   return account?.provider === 'openai' && account.authenticationKind === 'oauth'
 }

@@ -269,6 +269,12 @@ impl SettingsService for DefaultSettingsService {
                 {
                     return Err(AdminError::invalid("xAI 不支持此价格档位"));
                 }
+                // 中转上游只按 standard 档计费，其他档位不会生效
+                if command.provider == "newapi"
+                    && pricing.bands.keys().any(|band| band != "standard")
+                {
+                    return Err(AdminError::invalid("new-api 只支持标准档价格"));
+                }
                 if !pricing.bands.contains_key("standard")
                     && command
                         .models

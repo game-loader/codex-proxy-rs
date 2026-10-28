@@ -6,7 +6,7 @@ import type { Account, AccountGroupRef } from '@/api'
 
 import { Openai, Xai } from '@boxicons/vue'
 import { ZButton, ZDialog, ZIconButton, ZSegmented } from '@codex-proxy/ui'
-import { Copy, LayoutGrid, Settings2 } from '@lucide/vue'
+import { Copy, LayoutGrid, Network, Settings2 } from '@lucide/vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
@@ -82,8 +82,13 @@ const importText = computed({
 })
 
 function continueToImport() {
-  if (canSelect.value && !modelError.value && scheduling.value.valid && !props.groupsLoading && !proxyError.value && !busy.value)
-    form.value.step = 'import'
+  if (!canSelect.value || modelError.value || !scheduling.value.valid || props.groupsLoading || proxyError.value || busy.value)
+    return
+  // 平台没有当前方式时落到其首个可用方式，例如 new-api 没有 OAuth
+  const first = view.value.modeOptions[0]
+  if (first && !view.value.modeOptions.some(option => option.value === form.value.mode))
+    form.value.mode = first.value
+  form.value.step = 'import'
 }
 </script>
 
@@ -101,6 +106,7 @@ function continueToImport() {
       <LayoutGrid v-else-if="view.isBatch" class="text-cp-text" :size="20" aria-hidden="true" />
       <Xai v-else-if="view.provider === 'xai'" class="text-cp-text" :width="20" :height="20" aria-hidden="true" />
       <Openai v-else-if="view.provider === 'openai'" class="text-cp-text" :width="20" :height="20" aria-hidden="true" />
+      <Network v-else-if="view.provider === 'newapi'" class="text-cp-text" :size="20" aria-hidden="true" />
     </template>
 
     <div class="grid gap-4">
@@ -169,7 +175,7 @@ function continueToImport() {
           :disabled="busy"
           @regenerate="emit('generateOauth')"
         />
-        <AccountApiKeyFields v-else-if="mode === 'api_key'" v-model="form.apiKey" :disabled="busy" />
+        <AccountApiKeyFields v-else-if="mode === 'api_key'" v-model="form.apiKey" :disabled="busy" :show-transport="view.provider === 'openai'" />
         <AccountImportFields
           v-else
           :key="mode"

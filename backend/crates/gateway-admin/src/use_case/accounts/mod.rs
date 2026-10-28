@@ -108,6 +108,14 @@ pub trait AccountsService: Send + Sync {
         Ok(None)
     }
 
+    /// 账号所属 Provider；连接设置更新按此分派到对应凭据实现
+    async fn account_provider(
+        &self,
+        _account_id: &ProviderAccountId,
+    ) -> Result<gateway_core::routing::ProviderKind, AdminError> {
+        Err(AdminError::not_found("Provider 账号不存在"))
+    }
+
     async fn quota(
         &self,
         account_id: &ProviderAccountId,
@@ -831,6 +839,13 @@ impl AccountsService for DefaultAccountsService {
         }
         publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
         Ok(result)
+    }
+
+    async fn account_provider(
+        &self,
+        account_id: &ProviderAccountId,
+    ) -> Result<gateway_core::routing::ProviderKind, AdminError> {
+        Ok(self.load_account(account_id).await?.account.provider_kind)
     }
 
     async fn account_configuration(

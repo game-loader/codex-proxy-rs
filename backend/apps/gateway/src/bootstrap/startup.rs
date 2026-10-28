@@ -79,11 +79,20 @@ impl Providers {
             provider_openai::initialize(config.with_timezone(environment.timezone), ports.clone())
                 .await?;
         environment.host.report_startup_ready("OpenAI Provider");
+        let newapi = provider_newapi::initialize(&ports)?;
         let xai = provider_xai::initialize(ports).await?;
         environment.host.report_startup_ready("xAI Provider");
-        let core = ProviderRegistry::new([openai.core_provider(), xai.core_provider()])?;
-        let admin = ProviderAdminRegistry::new([openai.admin_provider(), xai.admin_provider()])
-            .map_err(|_| gateway_admin::model::AdminError::invalid("Provider 管理身份冲突"))?;
+        let core = ProviderRegistry::new([
+            openai.core_provider(),
+            xai.core_provider(),
+            newapi.core_provider(),
+        ])?;
+        let admin = ProviderAdminRegistry::new([
+            openai.admin_provider(),
+            xai.admin_provider(),
+            newapi.admin_provider(),
+        ])
+        .map_err(|_| gateway_admin::model::AdminError::invalid("Provider 管理身份冲突"))?;
         Ok(Self {
             openai,
             xai,

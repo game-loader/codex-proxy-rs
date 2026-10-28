@@ -259,7 +259,7 @@ impl UpdateAccountRequest {
     }
 }
 
-/// 编辑 OpenAI 账号的连接设置；OAuth 仅接受传输方式
+/// 编辑 API Key 账号的连接设置；OpenAI OAuth 仅接受传输方式，new-api 忽略传输方式
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountConnectionUpdateRequest {

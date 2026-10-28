@@ -78,10 +78,69 @@ pub fn decode_catalog(body: &[u8]) -> Result<PricingSyncPreview, AdminError> {
             result.prices.insert(provider.to_owned(), prices);
         }
     }
+    let mut relayed = BTreeMap::new();
+    for source in NEWAPI_SOURCES {
+        // 中转来源可缺省；同名模型按来源顺序取首个可表示的价格
+        let Some(models) = catalog
+            .get(source)
+            .and_then(|p| p.get("models"))
+            .and_then(Value::as_object)
+        else {
+            continue;
+        };
+        for (model, value) in models {
+            if model.is_empty()
+                || model.len() > 128
+                || model.chars().any(|c| c.is_whitespace() || c.is_control())
+                || relayed.contains_key(model)
+            {
+                continue;
+            }
+            match relay_price(value) {
+                Some(price) => {
+                    relayed.insert(model.clone(), price);
+                }
+                None => result.skipped.push(format!("{source}/{model}")),
+            }
+        }
+    }
+    if !relayed.is_empty() {
+        result.prices.insert(NEWAPI_PROVIDER.to_owned(), relayed);
+    }
     if result.prices.is_empty() {
         return Err(source_error());
     }
     Ok(result)
+}
+
+/// new-api Provider 的价格分组与 models.dev 来源；国际站 `zai` 先于折算价的 `zhipuai`
+const NEWAPI_PROVIDER: &str = "newapi";
+const NEWAPI_SOURCES: [&str; 3] = ["deepseek", "zai", "zhipuai"];
+
+/// 中转模型只按 standard 档计价；上下文分档和独立音频价无法表示时跳过
+fn relay_price(model: &Value) -> Option<ModelPriceOverride> {
+    let output = model.pointer("/modalities/output")?.as_array()?;
+    if output.len() != 1 || output[0].as_str()? != "text" {
+        return None;
+    }
+    let cost = model.get("cost")?;
+    if ["input_audio", "output_audio", "tiers", "context_over_200k"]
+        .iter()
+        .any(|key| cost.get(key).is_some())
+    {
+        return None;
+    }
+    // 推理 Token 计入输出用量，只有与输出同价时才能按输出价准确计费
+    if let Some(reasoning) = cost.get("reasoning")
+        && reasoning.as_number().map(ToString::to_string)
+            != cost.get("output")?.as_number().map(ToString::to_string)
+    {
+        return None;
+    }
+    Some(ModelPriceOverride {
+        multiplier_bps: 10_000,
+        bands: BTreeMap::from([("standard".to_owned(), rates(cost)?)]),
+    })
 }
 
 fn model_price(provider: &str, model: &Value) -> Option<ModelPriceOverride> {

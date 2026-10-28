@@ -1049,6 +1049,9 @@ OAuth 等待回调期间不持有保护；提交仍拒绝已删除或连接配�
 - xAI 从单账号 object 或 `accounts` 数组中提取 OAuth token；并发、优先级等字段不参与认证
 - xAI 批量导入逐条独立校验：失败条目跳过并记录日志，不中断其余条目，仅当没有任何条目成功时整个导入才报错
 - xAI API Key 不是受支持的账号 credential
+- new-api 接受单账号 `{ name?, base_url, api_key }` 或 `accounts` 数组（最多 200 项）；`base_url` 末尾的
+  `/responses` 会被去掉，名称缺省为地址主机名。导出格式与批量导入相同。连接更新只替换提供的地址或密钥，
+  `transport` 固定为 `http`
 - OAuth 导入由目标 Provider 完成必要的 token exchange 或身份投影。API Key 导入校验凭据格式与地址，不调用 OAuth 或 ChatGPT 身份接口；可用性由模型目录和连接测试验证
 
 API Key 账号使用以下独立凭据形态：
@@ -1783,7 +1786,9 @@ xAI 不接受 `flex`、`long_flex`、`ultrafast`、`long_ultrafast`、`image`。
 一批更新原子提交并写审计，不覆盖未选中的模型。未知字段、错误类型和非法价格字符串等 JSON 合同错误
 返回 422；Provider、模型 ID、批量数量、倍率上限和不支持的档位等业务校验错误返回 400。
 models.dev 同步只导入可表示为当前文本 Token 计价的 OpenAI/xAI 模型；不完整价格、其他输出模态及
-不匹配的上下文梯度在 `skipped` 中返回 `provider/model`。确认会重新抓取价目；若与预览不同返回 400，
+不匹配的上下文梯度在 `skipped` 中返回 `provider/model`。来源 `deepseek`、`zai`、`zhipuai` 合并为
+`newapi` 组：同名模型按此顺序取首个，只导入 standard 档；带上下文分档、音频价或推理价不同于输出价的
+模型跳过。`newapi` 人工配置也只接受 `standard` 档。确认会重新抓取价目；若与预览不同返回 400，
 需重新预览。来源不可用返回 502，已有价目保持不变。`preview` 必须原样提交，`models` 按 Provider
 指定 1～10000 个待同步模型；空选择或未登记的模型返回 400。同步只更新选中模型的来源层，未选中模型
 及所有人工单价与倍率保持不变。选中的已同步模型若不再出现在来源价目中，则移除其来源层，恢复内置价格；

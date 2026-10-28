@@ -110,5 +110,17 @@ export function accountImportModes(provider: string | undefined) {
       },
     ]
   }
+  if (provider === 'newapi') {
+    return [
+      {
+        label: t('common.fields.apiKey'),
+        value: 'api_key' as const,
+      },
+      {
+        label: t('accounts.onboarding.accountFile'),
+        value: 'json' as const,
+      },
+    ]
+  }
   return []
 }

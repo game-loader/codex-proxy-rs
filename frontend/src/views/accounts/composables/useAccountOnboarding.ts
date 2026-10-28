@@ -70,11 +70,26 @@ export function useAccountOnboarding(options: {
         return
       const provider = accountCreateProvider(form)
       if (mode === 'api_key') {
-        if (requireImportProvider(provider) !== 'openai')
+        const importProvider = requireImportProvider(provider)
+        if (importProvider !== 'openai' && importProvider !== 'newapi')
           throw new Error(t('accounts.onboarding.apiKeyUnsupported'))
         const error = apiKeyAccountError(form.apiKey)
         if (error)
           throw new Error(error)
+        if (importProvider === 'newapi') {
+          await importAccounts({
+            provider: importProvider,
+            settings,
+            outboundProxyId,
+            data: {
+              name: form.apiKey.name.trim(),
+              base_url: form.apiKey.base_url.trim(),
+              api_key: form.apiKey.apiKey,
+            },
+          })
+          await finishCreate(t('accounts.onboarding.apiKeyAccountAdded'))
+          return
+        }
         await importAccounts({
           provider: 'openai',
           settings,

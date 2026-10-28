@@ -19,6 +19,7 @@ gateway-host = { path = "../../crates/gateway-host" }
 gateway-plugin-runtime = { path = "../../crates/gateway-plugin/runtime" }
 gateway-store = { path = "../../crates/gateway-store" }
 provider-openai = { path = "../../crates/providers/openai" }
+provider-newapi = { path = "../../crates/providers/newapi" }
 provider-xai = { path = "../../crates/providers/xai" }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"

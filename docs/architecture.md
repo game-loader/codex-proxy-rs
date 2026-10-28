@@ -69,6 +69,7 @@ flowchart TB
 | `gateway-plugin/runtime`（包名 `gateway-plugin-runtime`） | 插件包校验、能力适配、双向 RPC 与发布集合；通过 Host 管理子进程和受管 HTTP |
 | `providers/openai` | OpenAI OAuth、账号选择、目录、额度、Responses/Images/Search transport |
 | `providers/xai` | xAI OAuth session、账号选择、目录、额度和 Grok/Responses 转换 |
+| `providers/newapi` | new-api 等 Responses 兼容中转的 API Key 账号、`/models` 目录和 HTTP/SSE 透传 |
 | `frontend` | Vue 管理端与 Key 用量页，仅通过各自身份允许的控制面 API 访问状态 |
 | 独立仓库 `codex-proxy-ui` | 管理端与插件页面共用的 Vue 基础组件、纯主题算法和样式，不依赖宿主业务状态、路由或 API |
 | 独立仓库 `codex-proxy-plugins` | 官方维护综合示例，依赖公开 SDK，Rust 处理器和已构建页面合成一个可安装包，不随宿主构建发版 |
@@ -511,6 +512,9 @@ OpenAI 模型目录用于发现，不因目录缺项拒绝请求；管理员配�
   API 保留原始入站事实，Core 只传递头值字节和通话归属，具体合同见 [Codex Live 语音通话](api.md#codex-live-语音通话)
 - xAI 是翻译边界。Provider 把 Grok wire 转换为 Responses wire；上游结构化错误的 message/code/type
   可以透出，但账号指纹会先脱敏
+- new-api 是透传边界。Provider 只替换 `model` 并强制 `stream`，上游 Responses SSE 原字节交付，
+  不做会话亲和、原生续接、客户端身份或额度窗口；目录取各账号 `/models` 并集且不穷举，
+  会话绑定、计价和调度均以 `newapi` 为键，与 OpenAI 隔离
 - response ID 是不透明 UTF-8 bytes，不假设 UUID、固定长度或跨 Provider 可复用
 - OpenAI 与 xAI 用户身份选择由 PostgreSQL 保存，Core 在 `FrozenAccountScope` 中按 Key 整体覆盖通用选择，
   以 Provider-owned 不透明对象沿路由计划传递；执行会话复用首次解析结果，使重试不受发布更新影响。

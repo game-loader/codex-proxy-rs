@@ -256,9 +256,14 @@ where
     let (command, connection) = request.into_command().map_err(map_wire_error)?;
     let context = auth.context().mutation_context();
     let result = if let Some(provider_material) = connection {
-        let provider = ProviderKind::new("openai").map_err(|_| AdminError::internal())?;
         let account_id = ProviderAccountId::new(command.account_id.clone())
             .map_err(|_| AdminError::internal())?;
+        let provider = state
+            .admin_services()
+            .accounts()
+            .account_provider(&account_id)
+            .await
+            .map_err(map_service_error)?;
         let result = state
             .admin_services()
             .credentials()

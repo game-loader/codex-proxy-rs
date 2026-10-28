@@ -8,7 +8,7 @@ import { ZButton, ZDialog, ZFormItem, ZSegmented, ZTextarea } from '@codex-proxy
 import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
-import { isOpenAiApiKeyAccount, isOpenAiOAuthAccount } from '../utils/upstreamApiKey'
+import { isEditableApiKeyAccount, isOpenAiOAuthAccount, isRelayApiKeyAccount } from '../utils/upstreamApiKey'
 import AccountApiKeyFields from './AccountApiKeyFields.vue'
 import AccountIdentityCell from './AccountIdentityCell.vue'
 import AccountSettingsFields from './AccountSettingsFields.vue'
@@ -73,11 +73,11 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         <ZSegmented v-model="oauthTransport" :aria-label="t('accounts.editor.transportLabel')" :options="transportOptions" :disabled="saving || !configurationReady" />
       </ZFormItem>
 
-      <section v-if="isOpenAiApiKeyAccount(account)" class="grid gap-4">
+      <section v-if="isEditableApiKeyAccount(account)" class="grid gap-4">
         <h3 class="m-0 text-cp font-heavy text-cp-text">
           {{ t('accounts.editor.upstreamConnection') }}
         </h3>
-        <AccountApiKeyFields v-model="apiKey" editing :disabled="saving || !configurationReady" />
+        <AccountApiKeyFields v-model="apiKey" editing :disabled="saving || !configurationReady" :show-transport="!isRelayApiKeyAccount(account)" />
       </section>
 
       <AccountSettingsFields
@@ -115,7 +115,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
       <ZButton
         type="primary"
         :loading="saving"
-        :disabled="!account || groupsLoading || (isOpenAiApiKeyAccount(account) && !configurationReady)"
+        :disabled="!account || groupsLoading || (isEditableApiKeyAccount(account) && !configurationReady)"
         @click="emit('save')"
       >
         {{ t('common.actions.save') }}

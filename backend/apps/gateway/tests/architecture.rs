@@ -21,6 +21,7 @@ pub(super) const WORKSPACE_MEMBERS: &[&str] = &[
     "crates/gateway-plugin/sdk",
     "crates/gateway-protocol",
     "crates/gateway-store",
+    "crates/providers/newapi",
     "crates/providers/openai",
     "crates/providers/xai",
 ];
@@ -61,6 +62,7 @@ fn gateway_core_depends_on_no_http_db_redis_or_provider_crate() {
             "redis",
             "gateway-host",
             "gateway-store",
+            "provider-newapi",
             "provider-openai",
             "provider-xai",
         ],
@@ -282,8 +284,18 @@ fn plugin_sdk_has_no_workspace_dependencies() {
 
 #[test]
 fn provider_crates_do_not_depend_on_each_other() {
-    assert_no_dependency("crates/providers/openai", &["provider-xai"]);
-    assert_no_dependency("crates/providers/xai", &["provider-openai"]);
+    assert_no_dependency(
+        "crates/providers/openai",
+        &["provider-xai", "provider-newapi"],
+    );
+    assert_no_dependency(
+        "crates/providers/xai",
+        &["provider-openai", "provider-newapi"],
+    );
+    assert_no_dependency(
+        "crates/providers/newapi",
+        &["provider-openai", "provider-xai"],
+    );
 }
 
 #[test]
@@ -306,6 +318,7 @@ const PACKAGE_TO_MEMBER: &[(&str, &str)] = &[
     ("gateway-plugin-sdk", "crates/gateway-plugin/sdk"),
     ("gateway-protocol", "crates/gateway-protocol"),
     ("gateway-store", "crates/gateway-store"),
+    ("provider-newapi", "crates/providers/newapi"),
     ("provider-openai", "crates/providers/openai"),
     ("provider-xai", "crates/providers/xai"),
 ];
@@ -339,6 +352,7 @@ const ADAPTER_PUBLIC_MODULES: &[(&str, &[&str])] = &[
         &["config", "credential", "transport"],
     ),
     ("crates/providers/xai", &["transport"]),
+    ("crates/providers/newapi", &[]),
 ];
 
 /// 不对应单一生产模块、而是校验 crate/workspace 整体契约的根级测试场景
@@ -356,6 +370,7 @@ const ALLOWED_INTERNAL_EDGES: &[(&str, &str)] = &[
     ("codex-proxy-rs", "gateway-host"),
     ("codex-proxy-rs", "gateway-plugin-runtime"),
     ("codex-proxy-rs", "gateway-store"),
+    ("codex-proxy-rs", "provider-newapi"),
     ("codex-proxy-rs", "provider-openai"),
     ("codex-proxy-rs", "provider-xai"),
     ("gateway-admin", "gateway-core"),
@@ -371,6 +386,9 @@ const ALLOWED_INTERNAL_EDGES: &[(&str, &str)] = &[
     ("gateway-plugin-runtime", "gateway-protocol"),
     ("gateway-store", "gateway-admin"),
     ("gateway-store", "gateway-core"),
+    ("provider-newapi", "gateway-admin"),
+    ("provider-newapi", "gateway-core"),
+    ("provider-newapi", "gateway-protocol"),
     ("provider-openai", "gateway-admin"),
     ("provider-openai", "gateway-core"),
     ("provider-openai", "gateway-protocol"),
