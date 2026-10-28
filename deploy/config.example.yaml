@@ -69,6 +69,21 @@ admin:
 client:
   # 统一登录中密钥身份的固定会话有效期。
   session_ttl_minutes: 1440
+  # 飞书登录；取消注释并填写后重启生效，首次登录按 provision 自动创建 Key。
+  # feishu:
+  #   app_id: 'cli_xxx'
+  #   app_secret: ''
+  #   # 须与飞书开发者后台「安全设置」登记的重定向 URL 完全一致。
+  #   redirect_uri: 'https://proxy.example.com/api/auth/feishu/callback'
+  #   allowed_tenant_keys: ['']
+  #   provision:
+  #     enabled: true
+  #     group_ids: []
+  #     max_concurrency: 0
+  #     requests_per_minute: 0
+  #     daily_limit_usd: '0'
+  #     weekly_limit_usd: '0'
+  #     # max_users: 200
 
 api:
   # Docker 内由 CPR_WEB_DIST_DIR 覆盖。

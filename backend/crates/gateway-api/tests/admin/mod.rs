@@ -97,6 +97,13 @@ mod settings;
 mod system;
 mod wire;
 
+/// 飞书登录配置、换码端口与绑定存储
+pub(super) type FeishuFixture = (
+    gateway_admin::FeishuConfig,
+    Arc<dyn gateway_admin::ports::external_identity::ExternalIdentityExchange>,
+    Arc<dyn gateway_admin::ports::external_identity::ExternalIdentityStore>,
+);
+
 pub(super) struct AdminTestFixture {
     pub services: AdminServices,
     plugin_ports: Arc<plugins::TestPluginPorts>,
@@ -142,6 +149,25 @@ impl AdminTestFixture {
         verifier: Option<Arc<dyn ClientKeyVerifier>>,
         timezone: gateway_core::time::DeploymentTimeZone,
     ) -> Self {
+        Self::build(system, verifier, timezone, None).await
+    }
+
+    pub async fn with_feishu(verifier: Arc<dyn ClientKeyVerifier>, feishu: FeishuFixture) -> Self {
+        Self::build(
+            Arc::new(UnusedSystem),
+            Some(verifier),
+            Default::default(),
+            Some(feishu),
+        )
+        .await
+    }
+
+    async fn build(
+        system: Arc<dyn SystemOperations>,
+        verifier: Option<Arc<dyn ClientKeyVerifier>>,
+        timezone: gateway_core::time::DeploymentTimeZone,
+        feishu: Option<FeishuFixture>,
+    ) -> Self {
         let api_key = Arc::new(Mutex::new(None));
         let auth = Arc::new(MemoryAuthStore::new(api_key.clone()));
         let settings = Arc::new(MemorySettingsStore::new(api_key));
@@ -171,7 +197,7 @@ impl AdminTestFixture {
         });
         let plugin_ports = Arc::new(plugins::TestPluginPorts::default());
         let published_snapshot = gateway_core::runtime::RuntimeSnapshotHandle::default();
-        let stores = AdminStorePorts::new(
+        let mut stores = AdminStorePorts::new(
             AdminAccountStorePorts::new(
                 unused.clone(),
                 unused.clone(),
@@ -188,6 +214,13 @@ impl AdminTestFixture {
             plugin_ports.clone(),
             plugin_ports.clone(),
         );
+        let (feishu_config, feishu_exchange) = match feishu {
+            Some((config, exchange, store)) => {
+                stores = stores.with_external_identities(store);
+                (Some(config), Some(exchange))
+            }
+            None => (None, None),
+        };
         let provider_quota = Arc::new(Mutex::new(None));
         let providers: Vec<Arc<dyn ProviderAdmin>> = vec![
             Arc::new(UnusedProvider::new(
@@ -208,7 +241,10 @@ impl AdminTestFixture {
                 default_username: "admin_1".to_owned(),
                 default_password: InitialAdminPassword::new("strong-admin-password"),
             },
-            ClientConfig::default(),
+            ClientConfig {
+                feishu: feishu_config,
+                ..ClientConfig::default()
+            },
             stores,
             gateway_admin::AdminRuntimePorts {
                 timezone,
@@ -227,6 +263,7 @@ impl AdminTestFixture {
                 client_distribution: Arc::new(StaticClientDistribution),
                 system,
                 client_key_verifier: verifier.unwrap_or_else(|| Arc::new(UnusedClientKeyVerifier)),
+                feishu_exchange,
             },
         )
         .await

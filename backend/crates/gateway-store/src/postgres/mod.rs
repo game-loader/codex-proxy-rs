@@ -11,6 +11,7 @@ mod connection;
 mod control_plane;
 mod execution;
 mod execution_buffer;
+mod external_identities;
 mod observability;
 mod ops_events;
 mod plugins;
@@ -38,6 +39,7 @@ pub use control_plane::{
 };
 pub use execution::*;
 pub use execution_buffer::*;
+pub use external_identities::PgExternalIdentityStore;
 pub use observability::*;
 pub use ops_events::*;
 pub use plugins::PgPluginStore;

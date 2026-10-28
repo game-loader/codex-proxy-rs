@@ -10,10 +10,12 @@ import AppBrandMark from '@/components/AppBrandMark.vue'
 const props = defineProps<{
   loading: boolean
   submitDisabled: boolean
+  feishuAvailable: boolean
 }>()
 
 const emit = defineEmits<{
   submit: []
+  feishu: []
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
@@ -162,6 +164,22 @@ const submitLabel = computed(() => {
           <span>{{ submitLabel }}</span>
         </ZButton>
       </div>
+      <template v-if="isKeyRealm && props.feishuAvailable">
+        <div class="flex items-center gap-3 text-xs text-(--cp-login-description-color)" aria-hidden="true">
+          <span class="h-px flex-1 bg-(--cp-login-edge-color-middle)" />
+          {{ t('auth.feishuDivider') }}
+          <span class="h-px flex-1 bg-(--cp-login-edge-color-middle)" />
+        </div>
+        <ZButton
+          variant="plain"
+          size="large"
+          class="login-submit"
+          :disabled="props.loading"
+          @click="emit('feishu')"
+        >
+          <span>{{ t('auth.feishuSignIn') }}</span>
+        </ZButton>
+      </template>
     </div>
   </ZCard>
 </template>

@@ -143,8 +143,8 @@ impl SystemOperations for VersionSystem {
     }
 }
 
-struct AcceptingVerifier {
-    key_id: ClientApiKeyId,
+pub(crate) struct AcceptingVerifier {
+    pub(crate) key_id: ClientApiKeyId,
 }
 
 impl ClientKeyVerifier for AcceptingVerifier {

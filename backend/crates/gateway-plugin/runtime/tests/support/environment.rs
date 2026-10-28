@@ -607,6 +607,7 @@ impl Environment {
                 client_distribution: unavailable.clone(),
                 system: unavailable,
                 client_key_verifier: core.client_key_verifier(),
+                feishu_exchange: None,
             },
             access,
         )

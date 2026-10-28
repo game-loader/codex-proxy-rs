@@ -17,6 +17,7 @@ use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
 
 pub mod backup;
+mod feishu;
 pub mod freeze_recovery;
 pub mod model;
 pub mod ports;
@@ -25,6 +26,7 @@ mod reset_credit_automation;
 mod use_case;
 pub use use_case::plugins::{PluginDistributionPorts, PluginManagementService, PluginsService};
 
+pub use feishu::{FeishuAppSecret, FeishuConfig, FeishuProvisionConfig};
 pub use use_case::key_usage::KeyUsageService;
 
 pub use use_case::{
@@ -120,25 +122,32 @@ fn default_absolute_session_ttl_minutes() -> u64 {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct ClientConfig {
     pub session_ttl_minutes: u64,
+    /// 飞书登录；缺省时不提供该登录方式
+    #[serde(default)]
+    pub feishu: Option<FeishuConfig>,
 }
 
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             session_ttl_minutes: DEFAULT_CLIENT_SESSION_TTL_MINUTES,
+            feishu: None,
         }
     }
 }
 
 impl ClientConfig {
-    /// 校验 Client session TTL；当前配置不含相对路径
+    /// 校验 Client session TTL 与飞书登录配置；当前配置不含相对路径
     ///
     /// # Errors
     ///
-    /// 会话有效期为零或无法安全换算时返回错误
+    /// 会话有效期为零、无法安全换算或飞书配置不合法时返回错误
     pub fn resolve_and_validate(&mut self, _source_dir: &Path) -> Result<(), AdminConfigError> {
         if self.session_ttl_minutes == 0 || i64::try_from(self.session_ttl_minutes).is_err() {
             return Err(AdminConfigError::InvalidField("client.session_ttl_minutes"));
+        }
+        if let Some(feishu) = &self.feishu {
+            feishu.validate()?;
         }
         Ok(())
     }
@@ -353,6 +362,8 @@ pub struct AdminRuntimePorts {
     pub client_distribution: Arc<dyn ClientDistributionResolver>,
     pub system: Arc<dyn SystemOperations>,
     pub client_key_verifier: Arc<dyn ClientKeyVerifier>,
+    /// 配置飞书登录时必须提供
+    pub feishu_exchange: Option<Arc<dyn ports::external_identity::ExternalIdentityExchange>>,
 }
 
 /// 校验配置、接入已组装的 Provider 注册表并完成默认管理员幂等初始化
@@ -403,6 +414,7 @@ async fn initialize_inner(
         client_distribution,
         system,
         client_key_verifier,
+        feishu_exchange,
     } = runtime;
     config
         .resolve_and_validate(Path::new("."))
@@ -412,11 +424,26 @@ async fn initialize_inner(
         .map_err(|error| AdminError::invalid(error.to_string()))?;
     let registry = providers;
 
+    let feishu = match (
+        client_config.feishu.clone(),
+        feishu_exchange,
+        store.external_identities(),
+    ) {
+        (None, _, _) => None,
+        (Some(feishu), Some(exchange), Some(identities)) => Some(
+            use_case::auth::FeishuSignIn::new(feishu, exchange, identities, snapshot.clone())
+                .map_err(|error| AdminError::invalid(error.to_string()))?,
+        ),
+        (Some(_), _, _) => {
+            return Err(AdminError::internal("飞书登录缺少换码或绑定存储端口"));
+        }
+    };
     let auth = Arc::new(DefaultAuthService::new(
         &config,
         client_config.session_ttl_minutes,
         store.auth(),
         client_key_verifier.clone(),
+        feishu,
     ));
     auth.ensure_default_admin(config.default_password.expose())
         .await?;

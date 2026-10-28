@@ -18,6 +18,10 @@ export interface LogoutResponse {
   message: string
 }
 
+export interface LoginOptions {
+  feishu: boolean
+}
+
 interface ChangeAdminPasswordParam {
   currentPassword: string
   newPassword: string
@@ -57,6 +61,19 @@ export function getAuthStatus() {
     timeout: 10_000,
   })
 }
+
+export function getLoginOptions() {
+  return request<LoginOptions>({
+    url: '/api/auth/options',
+    method: 'GET',
+    skipSessionRecovery: true,
+    silent: true,
+    timeout: 10_000,
+  })
+}
+
+// 飞书授权是顶层导航，回调由服务端写会话 Cookie 并跳转
+export const FEISHU_AUTHORIZE_URL = '/api/auth/feishu/authorize'
 
 export function refreshAuthSession() {
   return withSessionLock(() => request<AuthStatusResponse>({

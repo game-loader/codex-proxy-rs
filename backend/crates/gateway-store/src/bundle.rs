@@ -220,7 +220,10 @@ async fn connect(
         plugins.clone(),
         plugins,
         usage_data,
-    );
+    )
+    .with_external_identities(Arc::new(postgres::PgExternalIdentityStore::new(
+        pool.clone(),
+    )));
 
     let execution_repository = Arc::new(postgres::PgExecutionStore::new(pool.clone()));
     let (execution, execution_writer) =

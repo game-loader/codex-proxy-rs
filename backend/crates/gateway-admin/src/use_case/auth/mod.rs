@@ -13,14 +13,18 @@ use crate::{
     model::{
         AdminError,
         auth::{
-            AuthSession, ChangePassword, LoginCommand, LoginError, SessionGrant, SessionSubject,
+            AuthSession, ChangePassword, ExternalAuthorization, LoginCommand, LoginError,
+            SessionGrant, SessionSubject,
         },
     },
     ports::store::AuthStore,
 };
 
+mod feishu;
 mod service;
 mod session;
+
+pub(crate) use feishu::FeishuSignIn;
 
 /// 所有控制面接口消费同一个会话服务，权限由服务端身份决定
 #[async_trait]
@@ -50,6 +54,10 @@ pub trait AuthService: Send + Sync {
         previous_session_id: Option<&str>,
     ) -> Result<SessionGrant, LoginError>;
     async fn logout(&self, session_id: &str) -> Result<(), AdminError>;
+    /// 生成新的 state 与 PKCE verifier；未配置飞书登录时返回 `None`
+    fn feishu_authorization(&self) -> Option<ExternalAuthorization>;
+    /// 已配置飞书登录时返回回调是否使用 HTTPS
+    fn feishu_secure_callback(&self) -> Option<bool>;
 }
 
 const MAX_SESSION_TTL_MINUTES: i64 = 366 * 24 * 60;
@@ -62,6 +70,7 @@ pub(crate) struct DefaultAuthService {
     key_session_ttl: Duration,
     store: Arc<dyn AuthStore>,
     verifier: Arc<dyn ClientKeyVerifier>,
+    feishu: Option<FeishuSignIn>,
 }
 
 impl DefaultAuthService {
@@ -71,6 +80,7 @@ impl DefaultAuthService {
         key_session_ttl_minutes: u64,
         store: Arc<dyn AuthStore>,
         verifier: Arc<dyn ClientKeyVerifier>,
+        feishu: Option<FeishuSignIn>,
     ) -> Self {
         let admin_session_ttl = session_ttl(config.session_ttl_minutes);
         Self {
@@ -82,6 +92,7 @@ impl DefaultAuthService {
             key_session_ttl: session_ttl(key_session_ttl_minutes),
             store,
             verifier,
+            feishu,
         }
     }
 

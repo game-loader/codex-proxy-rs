@@ -1,5 +1,7 @@
 //! 控制面统一登录、会话恢复与退出；身份由认证用例返回
 
+mod feishu;
+
 use std::{fmt, net::SocketAddr};
 
 use axum::{
@@ -117,6 +119,9 @@ where
         .route("/api/auth/refresh", post(refresh_session::<S>))
         .route("/api/auth/logout", post(logout::<S>))
         .route("/api/auth/password", post(change_password::<S>))
+        .route("/api/auth/options", get(options::<S>))
+        .route("/api/auth/feishu/authorize", get(feishu::authorize::<S>))
+        .route("/api/auth/feishu/callback", get(feishu::callback::<S>))
         .route("/api/auth", any(not_found))
         .route("/api/auth/{*path}", any(not_found))
         .method_not_allowed_fallback(method_not_allowed)
@@ -207,20 +212,28 @@ fn session_response(session: Option<&AuthSession>) -> Response {
 }
 
 fn set_session_cookie(
-    mut response: Response,
+    response: Response,
     headers: &HeaderMap,
+    grant: &gateway_admin::model::auth::SessionGrant,
+) -> Result<Response, AdminError> {
+    set_session_cookie_with(response, session_cookie::attributes(headers), grant)
+}
+
+fn set_session_cookie_with(
+    mut response: Response,
+    attributes: &str,
     grant: &gateway_admin::model::auth::SessionGrant,
 ) -> Result<Response, AdminError> {
     append_cookie(
         &mut response,
-        headers,
+        attributes,
         session_cookie::NAME,
         &grant.session_id,
         Some(grant.session.expires_at),
     )?;
     append_cookie(
         &mut response,
-        headers,
+        attributes,
         session_cookie::REFRESH_NAME,
         grant.refresh_token.as_deref().unwrap_or_default(),
         grant
@@ -234,12 +247,11 @@ fn set_session_cookie(
 
 fn append_cookie(
     response: &mut Response,
-    headers: &HeaderMap,
+    attributes: &str,
     name: &str,
     value: &str,
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<(), AdminError> {
-    let attributes = session_cookie::attributes(headers);
     let path = if name == session_cookie::REFRESH_NAME {
         "/api/auth"
     } else {
@@ -329,7 +341,13 @@ fn clear_session_cookie(
     headers: &HeaderMap,
 ) -> Result<Response, AdminError> {
     for name in [session_cookie::NAME, session_cookie::REFRESH_NAME] {
-        append_cookie(&mut response, headers, name, "", None)?;
+        append_cookie(
+            &mut response,
+            session_cookie::attributes(headers),
+            name,
+            "",
+            None,
+        )?;
     }
     Ok(response)
 }
@@ -341,7 +359,31 @@ fn map_login_error(error: LoginError) -> AdminError {
             retry_after_seconds,
         } => AdminError::too_many_login_attempts().with_retry_after(retry_after_seconds),
         LoginError::Unavailable => AdminError::service_unavailable(),
+        LoginError::AccessDenied => AdminError::forbidden(),
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoginOptionsData {
+    feishu: bool,
+}
+
+/// 登录页按服务端配置展示可用的登录方式
+async fn options<S>(State(state): State<S>) -> impl IntoResponse
+where
+    S: SessionState + Send + Sync,
+{
+    AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(LoginOptionsData {
+            feishu: state
+                .admin_services()
+                .auth()
+                .feishu_secure_callback()
+                .is_some(),
+        }),
+    )
 }
 
 async fn method_not_allowed() -> AdminError {

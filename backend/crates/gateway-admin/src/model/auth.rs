@@ -58,6 +58,11 @@ pub enum LoginCommand {
     Key {
         api_key: String,
     },
+    /// 飞书授权码回调；state 已由 API 校验，verifier 只用于本次换码
+    Feishu {
+        code: String,
+        code_verifier: String,
+    },
 }
 
 impl std::fmt::Debug for LoginCommand {
@@ -72,7 +77,33 @@ impl std::fmt::Debug for LoginCommand {
                 .debug_struct("KeyLogin")
                 .field("api_key", &"[REDACTED]")
                 .finish(),
+            Self::Feishu { .. } => formatter
+                .debug_struct("FeishuLogin")
+                .field("code", &"[REDACTED]")
+                .field("code_verifier", &"[REDACTED]")
+                .finish(),
         }
+    }
+}
+
+/// 外部登录的一次授权尝试；state 与 verifier 由 API 暂存在浏览器 HttpOnly Cookie
+#[derive(Clone, PartialEq, Eq)]
+pub struct ExternalAuthorization {
+    pub url: String,
+    pub state: String,
+    pub code_verifier: String,
+    /// 回调使用 HTTPS 时临时 Cookie 设置 Secure
+    pub secure_callback: bool,
+}
+
+impl std::fmt::Debug for ExternalAuthorization {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ExternalAuthorization")
+            .field("state", &"[REDACTED]")
+            .field("code_verifier", &"[REDACTED]")
+            .field("secure_callback", &self.secure_callback)
+            .finish_non_exhaustive()
     }
 }
 
@@ -107,6 +138,9 @@ pub enum LoginError {
     TooManyAttempts { retry_after_seconds: u64 },
     #[error("authentication is unavailable")]
     Unavailable,
+    /// 外部身份有效，但不属于允许的企业、未开通或对应 Key 已停用
+    #[error("external identity is not allowed to sign in")]
+    AccessDenied,
 }
 
 impl From<ClientAuthenticationError> for LoginError {

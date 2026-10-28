@@ -320,6 +320,7 @@ const ADAPTER_PUBLIC_MODULES: &[(&str, &[&str])] = &[
         &[
             "client_distribution",
             "config",
+            "feishu",
             "outbound",
             "official_plugins",
             "pricing",

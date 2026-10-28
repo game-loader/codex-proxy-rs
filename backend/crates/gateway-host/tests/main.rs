@@ -3,6 +3,7 @@
 mod client_distribution;
 mod command_line;
 mod config;
+mod feishu;
 mod logging;
 mod official_plugins;
 mod outbound;

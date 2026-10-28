@@ -190,6 +190,26 @@ store:
 `redis://u1@redis-host:6379/0`，其中主机名必须能从应用容器访问；只改 `config.yaml` 不会生效。
 默认 Compose Redis 服务使用密码认证，不会自动创建 ACL 用户
 
+### 飞书登录
+
+在飞书开放平台创建企业自建应用，开启网页应用能力，并在「安全设置」登记重定向 URL
+`https://<网关地址>/api/auth/feishu/callback`。随后在 `config.yaml` 填写 `client.feishu` 并重启：
+
+| 配置 | 含义 |
+| --- | --- |
+| `app_id` / `app_secret` | 应用凭证，`app_secret` 不能为空 |
+| `redirect_uri` | 与飞书后台登记的地址完全一致；HTTPS 地址使登录 Cookie 带 `Secure` |
+| `allowed_tenant_keys` | 允许登录的企业 `tenant_key`，至少一个 |
+| `provision.enabled` | 未绑定的成员首次登录时是否自动创建 Key，默认开启 |
+| `provision.group_ids` | 新 Key 的账号分组，空表示全部账号 |
+| `provision.max_concurrency` / `requests_per_minute` | 新 Key 的并发与 RPM，`0` 表示不限 |
+| `provision.daily_limit_usd` / `weekly_limit_usd` | 新 Key 的美元预算字符串，`0` 表示不限 |
+| `provision.max_users` | 自动开通的身份总数上限，省略表示不限 |
+
+模板只影响之后新建的 Key，已开通的 Key 在 Key 管理页调整。停用 Key 后对应成员不能登录；
+删除 Key 后该成员下次登录会重新开通。飞书离职或冻结的成员无法完成授权，但已签发的会话保持到期；
+需要立即收回时停用其 Key。浏览器流程与错误原因见[飞书登录 API](../docs/api.md#飞书登录)
+
 ## 启动
 
 ```bash

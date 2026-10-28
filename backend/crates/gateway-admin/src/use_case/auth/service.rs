@@ -86,6 +86,25 @@ impl DefaultAuthService {
                 }
                 Ok(SessionSubject::Key { client_key_id })
             }
+            LoginCommand::Feishu {
+                code,
+                code_verifier,
+            } => {
+                let Some(feishu) = &self.feishu else {
+                    return Err(LoginError::InvalidCredentials);
+                };
+                let client_key_id = feishu.resolve(&code, &code_verifier).await?;
+                // 与 Key 登录共用启用检查；停用的自动开通 Key 不能重新登录
+                if !self
+                    .store
+                    .client_key_enabled(&client_key_id)
+                    .await
+                    .map_err(|_| LoginError::Unavailable)?
+                {
+                    return Err(LoginError::AccessDenied);
+                }
+                Ok(SessionSubject::Key { client_key_id })
+            }
         }
     }
 }
@@ -322,6 +341,16 @@ impl AuthService for DefaultAuthService {
             return Err(LoginError::Unavailable);
         }
         Ok(grant)
+    }
+
+    fn feishu_authorization(&self) -> Option<crate::model::auth::ExternalAuthorization> {
+        self.feishu.as_ref().map(super::FeishuSignIn::authorization)
+    }
+
+    fn feishu_secure_callback(&self) -> Option<bool> {
+        self.feishu
+            .as_ref()
+            .map(super::FeishuSignIn::secure_callback)
     }
 
     async fn logout(&self, session_id: &str) -> Result<(), AdminError> {

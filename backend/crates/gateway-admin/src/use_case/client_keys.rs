@@ -305,7 +305,7 @@ fn validate_cursor(query: &ClientKeyListQuery) -> Result<(), AdminError> {
 }
 
 // 原生与插件创建共用相同的密钥生成规则
-pub(super) fn generate_key() -> String {
+pub(crate) fn generate_key() -> String {
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
     format!("sk_{}", URL_SAFE_NO_PAD.encode(bytes))

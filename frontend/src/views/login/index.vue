@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, shallowRef } from 'vue'
+import { computed, onMounted, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
+import { FEISHU_AUTHORIZE_URL, getLoginOptions } from '@/api'
 import AppLanguageMenu from '@/components/AppLanguageMenu.vue'
 import { useAuthStore } from '@/stores/modules/auth'
+import { notification } from '@/utils/notification'
 
 import LoginBackground from './components/LoginBackground.vue'
 import LoginPanel from './components/LoginPanel.vue'
@@ -23,6 +25,45 @@ const username = shallowRef('')
 const password = shallowRef('')
 const apiKey = shallowRef('')
 const loginPending = shallowRef(false)
+const feishuAvailable = shallowRef(false)
+
+function feishuErrorMessage(reason: string): string {
+  switch (reason) {
+    case 'forbidden':
+      return t('auth.feishuErrors.forbidden')
+    case 'rate_limited':
+      return t('auth.feishuErrors.rate_limited')
+    case 'unavailable':
+      return t('auth.feishuErrors.unavailable')
+    default:
+      return t('auth.feishuErrors.denied')
+  }
+}
+
+onMounted(async () => {
+  const reason = route.query.feishu_error
+  if (typeof reason === 'string') {
+    realm.value = 'key'
+    notification.error({
+      message: feishuErrorMessage(reason),
+    })
+    // 提示只展示一次，刷新页面不重复
+    void router.replace({
+      query: { ...route.query, feishu_error: undefined },
+    })
+  }
+  try {
+    feishuAvailable.value = (await getLoginOptions()).feishu
+  }
+  catch {
+    feishuAvailable.value = false
+  }
+})
+
+function handleFeishu(): void {
+  loginPending.value = true
+  window.location.assign(FEISHU_AUTHORIZE_URL)
+}
 
 const canSubmit = computed(() => realm.value === 'key'
   ? Boolean(apiKey.value.trim())
@@ -99,7 +140,9 @@ function resolveDestination(): string {
           v-model:api-key="apiKey"
           :loading="loginLoading"
           :submit-disabled="submitDisabled"
+          :feishu-available="feishuAvailable"
           @submit="handleSubmit"
+          @feishu="handleFeishu"
         />
       </div>
     </section>

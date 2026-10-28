@@ -584,9 +584,27 @@ pub struct AdminStorePorts {
     plugin_state: Arc<dyn super::plugins::PluginStateStore>,
     plugin_resources: Arc<dyn super::plugin_resources::PluginResourceStore>,
     usage_data: Arc<dyn super::usage_data::UsageDataStore>,
+    external_identities: Option<Arc<dyn super::external_identity::ExternalIdentityStore>>,
 }
 
 impl AdminStorePorts {
+    /// 外部登录绑定由持久化实现附加；未附加时不能启用外部登录
+    #[must_use]
+    pub fn with_external_identities(
+        mut self,
+        store: Arc<dyn super::external_identity::ExternalIdentityStore>,
+    ) -> Self {
+        self.external_identities = Some(store);
+        self
+    }
+
+    #[must_use]
+    pub fn external_identities(
+        &self,
+    ) -> Option<Arc<dyn super::external_identity::ExternalIdentityStore>> {
+        self.external_identities.clone()
+    }
+
     #[must_use]
     pub fn usage_data(&self) -> Arc<dyn super::usage_data::UsageDataStore> {
         self.usage_data.clone()
@@ -635,6 +653,7 @@ impl AdminStorePorts {
             plugin_state,
             plugin_resources,
             usage_data,
+            external_identities: None,
         }
     }
 

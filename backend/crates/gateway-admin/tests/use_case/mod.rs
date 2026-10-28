@@ -112,7 +112,15 @@ pub(super) struct AdminHarness {
     plugin_inspector: Arc<dyn gateway_admin::ports::plugins::PluginPackageInspector>,
     client_key_verifier: Arc<dyn ClientKeyVerifier>,
     service_middleware: gateway_admin::public_service::PlanSource,
+    feishu: Option<FeishuPorts>,
 }
+
+/// 飞书登录配置、换码端口与绑定存储
+type FeishuPorts = (
+    gateway_admin::FeishuConfig,
+    Arc<dyn gateway_admin::ports::external_identity::ExternalIdentityExchange>,
+    Arc<dyn gateway_admin::ports::external_identity::ExternalIdentityStore>,
+);
 
 impl AdminHarness {
     pub(super) fn new() -> Self {
@@ -142,7 +150,18 @@ impl AdminHarness {
             plugin_inspector: Arc::new(plugins::TestPluginPorts),
             client_key_verifier: Arc::new(UnavailableClientKeyVerifier),
             service_middleware: Arc::new(|| None),
+            feishu: None,
         }
+    }
+
+    pub(super) fn feishu(
+        mut self,
+        config: gateway_admin::FeishuConfig,
+        exchange: Arc<dyn gateway_admin::ports::external_identity::ExternalIdentityExchange>,
+        store: Arc<dyn gateway_admin::ports::external_identity::ExternalIdentityStore>,
+    ) -> Self {
+        self.feishu = Some((config, exchange, store));
+        self
     }
 
     pub(super) fn default_password(mut self, password: &str) -> Self {
@@ -258,6 +277,31 @@ impl AdminHarness {
     }
 
     pub(super) async fn build_bundle(self) -> gateway_admin::AdminBundle {
+        let (feishu_config, feishu_exchange, feishu_store) = match self.feishu {
+            Some((config, exchange, store)) => (Some(config), Some(exchange), Some(store)),
+            None => (None, None, None),
+        };
+        let stores = AdminStorePorts::new(
+            AdminAccountStorePorts::new(
+                self.accounts,
+                self.account_runtime,
+                self.account_groups,
+                self.proxies,
+            ),
+            self.auth,
+            self.client_keys,
+            self.observability,
+            self.settings,
+            self.backup,
+            self.plugin_store,
+            Arc::new(plugins::TestPluginPorts),
+            Arc::new(plugins::TestPluginPorts),
+            Arc::new(plugins::TestPluginPorts),
+        );
+        let stores = match feishu_store {
+            Some(store) => stores.with_external_identities(store),
+            None => stores,
+        };
         gateway_admin::initialize(
             AdminConfig {
                 session_absolute_ttl_minutes: 30 * 24 * 60,
@@ -267,24 +311,9 @@ impl AdminHarness {
             },
             ClientConfig {
                 session_ttl_minutes: self.client_session_ttl_minutes,
+                feishu: feishu_config,
             },
-            AdminStorePorts::new(
-                AdminAccountStorePorts::new(
-                    self.accounts,
-                    self.account_runtime,
-                    self.account_groups,
-                    self.proxies,
-                ),
-                self.auth,
-                self.client_keys,
-                self.observability,
-                self.settings,
-                self.backup,
-                self.plugin_store,
-                Arc::new(plugins::TestPluginPorts),
-                Arc::new(plugins::TestPluginPorts),
-                Arc::new(plugins::TestPluginPorts),
-            ),
+            stores,
             gateway_admin::AdminRuntimePorts {
                 timezone: Default::default(),
                 service_middleware: self.service_middleware,
@@ -304,6 +333,7 @@ impl AdminHarness {
                 client_distribution: Arc::new(NoopClientDistribution),
                 system: self.system,
                 client_key_verifier: self.client_key_verifier,
+                feishu_exchange,
             },
         )
         .await

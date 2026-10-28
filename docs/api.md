@@ -660,6 +660,9 @@ call 与账号的绑定保存在网关进程内，未连接时一小时过期；
 | `POST` | `/api/auth/refresh` | 无 | 使用管理员续期 Cookie 恢复访问凭据；返回同 status 的结构并同步 Cookie，Key 会话保持原期限 |
 | `POST` | `/api/auth/logout` | 无 | 删除当前会话并清除 Cookie；存储失败返回 503，不假装退出成功 |
 | `POST` | `/api/auth/password` | `{ currentPassword, newPassword }` | 仅管理员会话可用；验证当前密码后修改密码，撤销全部管理员会话并清除当前 Cookie |
+| `GET` | `/api/auth/options` | 无 | 返回 `{ feishu }`，表示是否已配置飞书登录 |
+| `GET` | `/api/auth/feishu/authorize` | 无 | 浏览器导航入口；`303` 跳转到飞书授权页 |
+| `GET` | `/api/auth/feishu/callback` | `code`、`state` 查询参数 | 飞书回调；成功签发密钥身份会话并 `303` 到 `/key-usage` |
 
 登录返回 `data: { role: "admin" | "key", expiresAt }`；status 和 refresh 已登录时的 `session` 使用同一结构，
 未登录时为 `{ authenticated: false, session: null }`。`role` 由服务端已验证身份推导，不接受客户端声明。
@@ -682,11 +685,33 @@ call 与账号的绑定保存在网关进程内，未连接时一小时过期；
 每次恢复密钥会话时重新确认 Key 存在且启用；停用或删除后会话失效，重新启用不会恢复已撤销会话。
 依赖不可用时返回 503，不返回已认证或假装未登录。预算耗尽不妨碍登录
 
+#### 飞书登录
+
+配置 `client.feishu` 后，飞书用户通过授权码流程登录，得到与 Key 登录相同的密钥身份会话，只能访问 `/key-usage`。
+飞书登录不签发管理员身份
+
+- authorize 生成一次性 state 和 PKCE S256 challenge，verifier 与 state 写入 `cpr_feishu_flow` HttpOnly Cookie，
+  `Path=/api/auth/feishu`，有效 10 分钟；回调使用 HTTPS 时带 `Secure`
+- callback 校验查询中的 state 与 Cookie 一致后换码，无论结果都清除该 Cookie；会话 Cookie 的 `Secure` 按回调地址协议决定
+- 身份以飞书 `tenant_key` 与 `union_id` 识别，`tenant_key` 必须在允许列表；邮箱和手机号不参与识别
+- 首次登录按开通模板创建 Key 并绑定该身份；之后的登录复用绑定 Key，模板变化不影响已开通的 Key
+- 绑定 Key 停用后拒绝登录；删除 Key 同时解除绑定，下次登录重新开通
+- 飞书回调与其他登录共用登录限流
+
+失败时跳转 `/login?feishu_error=<reason>`：
+
+| reason | 含义 |
+| --- | --- |
+| `denied` | state 不匹配、Cookie 缺失、授权码无效或飞书拒绝授权 |
+| `forbidden` | 企业不在允许列表、未开启自动开通、达到人数上限或绑定 Key 已停用 |
+| `rate_limited` | 登录尝试超限 |
+| `unavailable` | 未配置飞书登录，或飞书与存储暂不可用 |
+
 密钥会话访问管理接口返回 403，不清除仍然有效的会话。
 浏览器会话不能替代 `/v1/*` 的 Bearer Key，数据面 Key 也不能替代浏览器会话
 
 所有 `/api/auth/*` 响应带 `Cache-Control: no-store`；未知路径和错误 method 返回 JSON，不落入 SPA。
-两种登录共享来源桶和全局桶，分别为每 60 秒 10 次 / 200 次；来源取连接 IP，不信任任意转发头。
+全部登录方式共享来源桶和全局桶，分别为每 60 秒 10 次 / 200 次；来源取连接 IP，不信任任意转发头。
 拒绝时使用 `42901` 和 `Retry-After`
 
 认证错误共用 `40101`（会话失效）、`40102`（凭据错误）和 `40301`（权限不足）。

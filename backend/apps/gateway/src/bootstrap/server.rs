@@ -70,6 +70,18 @@ pub async fn run() -> Result<(), BootstrapError> {
             gateway_admin::ProviderUsageBillingProjector::new(providers.admin.clone()),
         ))
     );
+    let feishu_exchange = match config.client.feishu.as_ref() {
+        Some(feishu) => Some(std::sync::Arc::new(or_shutdown!(
+            plugin_runtime,
+            gateway_host::feishu::FeishuIdentityExchange::new(feishu).map_err(|_| {
+                gateway_admin::model::AdminError::internal("飞书登录客户端初始化失败")
+            })
+        ))
+            as std::sync::Arc<
+                dyn gateway_admin::ports::external_identity::ExternalIdentityExchange,
+            >),
+        None => None,
+    };
     let mut admin = or_shutdown!(
         plugin_runtime,
         gateway_admin::initialize_with_plugin_accounts(
@@ -92,6 +104,7 @@ pub async fn run() -> Result<(), BootstrapError> {
                 client_distribution: host.client_distribution_resolver(),
                 system: host.system_operations(),
                 client_key_verifier: core.client_key_verifier(),
+                feishu_exchange,
             },
             management.accounts.clone(),
         )

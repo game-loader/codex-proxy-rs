@@ -654,7 +654,11 @@ Vue 普通管理请求的错误提示由 `api/request/` 请求封装统一负责
 ### 登录与查询身份
 
 管理员和密钥登录共用 `/api/auth/*`、AuthService、Redis 会话结构和 `cpr_session` Cookie。
-登录类型只选择凭据校验方式，权限来自服务端保存的身份。管理入口只接受管理员身份或部署级管理 API Key；
+登录类型只选择凭据校验方式，权限来自服务端保存的身份。
+飞书登录是密钥身份的另一种凭据校验：Host 的 `FeishuIdentityExchange` 只负责官方端点换码和读取用户，
+Admin 的 `FeishuSignIn` 判断企业、绑定和开通模板，Store 在持有配置 revision 行锁的同一事务内复查绑定与人数上限，
+写入 Key、`client_key_external_identities` 绑定和审计，提交后由 Admin 发布快照；Key 启用检查与 Key 登录共用。
+state 与 PKCE verifier 只保存在浏览器的短期 HttpOnly Cookie，不进入 Redis。管理入口只接受管理员身份或部署级管理 API Key；
 AuthService 每次恢复 Key 会话时重新检查 Key 是否存在且启用；Key 会话不能访问管理员页面和管理接口。
 前端只维护一份 Auth Store，不在每个 API 请求上标记身份；401 会话失效、403 权限不足和 503 依赖故障分别处理。
 成功登录替换当前浏览器的旧会话，登出必须确认服务端撤销。

@@ -27,6 +27,7 @@ mod connection;
 mod control_plane;
 mod execution;
 mod execution_buffer;
+mod external_identities;
 mod health;
 mod observability;
 mod ops_events;

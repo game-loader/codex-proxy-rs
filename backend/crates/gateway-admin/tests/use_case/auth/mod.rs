@@ -433,4 +433,5 @@ async fn admin_login(
     .unwrap()
 }
 
+mod feishu;
 mod session;
