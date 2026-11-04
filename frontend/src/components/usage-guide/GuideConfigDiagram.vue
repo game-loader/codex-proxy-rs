@@ -3,6 +3,7 @@ import { ZSegmented } from '@codex-proxy/ui'
 import { Apple, FileCode, FileKey, Folder, Monitor } from '@lucide/vue'
 import { computed, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import GuideMark from './GuideMark.vue'
 
 const props = defineProps<{ apiBaseUrl: string }>()
 
@@ -32,7 +33,6 @@ const snippet = computed(() => {
     { text: 'experimental_bearer_token = "<API Key>"', mark: 5 },
   ]
 })
-const markClass = 'inline-flex size-4.5 shrink-0 items-center justify-center rounded-full bg-z-primary font-sans text-[0.6875rem] leading-none text-z-text-light-solid'
 const fields = computed(() => [
   {
     mark: 1,
@@ -91,12 +91,12 @@ const fields = computed(() => [
         <div class="px-4 py-2.5 font-mono text-z-sm font-emphasis text-z-text-secondary">
           config.toml
         </div>
-        <pre tabindex="0" :aria-label="t('guide.config.snippet')" class="mx-3 mb-3 overflow-x-auto rounded-z bg-z-bg-container px-3.5 py-3 font-mono text-z-sm leading-[1.65] text-z-text shadow-z-tertiary"><span v-for="(line, index) in snippet" :key="index" class="flex min-h-[1.65em] w-max items-center gap-2"><span class="whitespace-pre">{{ line.text }}</span><span v-if="line.mark" :class="markClass" aria-hidden="true">{{ line.mark }}</span></span></pre>
+        <pre tabindex="0" :aria-label="t('guide.config.snippet')" class="mx-3 mb-3 overflow-x-auto rounded-z bg-z-bg-container px-3.5 py-3 font-mono text-z-sm leading-[1.65] text-z-text shadow-z-tertiary"><span v-for="(line, index) in snippet" :key="index" class="flex min-h-[1.65em] w-max items-center gap-2"><span class="whitespace-pre">{{ line.text }}</span><GuideMark v-if="line.mark" :value="line.mark" /></span></pre>
       </div>
 
       <ol class="m-0 flex list-none flex-col gap-2 p-0">
         <li v-for="field in fields" :key="field.mark" class="flex min-w-0 items-start gap-2.5">
-          <span class="mt-0.5" :class="[markClass]" aria-hidden="true">{{ field.mark }}</span>
+          <GuideMark class="mt-0.5" :value="field.mark" />
           <span class="flex min-w-0 flex-col gap-0.5">
             <code class="truncate font-mono text-z-sm text-z-text">{{ field.name }}</code>
             <span class="text-z-xs text-z-text-tertiary">{{ field.detail }}</span>

@@ -40,7 +40,9 @@ X-OpenAI-Actor-Authorization = "proxy-managed"
 
 [features]
 image_generation = true
-goals = true`
+goals = true
+# 从网关拉取模型列表
+api_key_model_discovery = true`
 }
 
 interface CodexCcSwitchImportInput {

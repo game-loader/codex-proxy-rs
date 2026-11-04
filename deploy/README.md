@@ -577,6 +577,8 @@ X-OpenAI-Actor-Authorization = "proxy-managed"
 [features]
 image_generation = true
 goals = true
+# 从网关拉取模型列表
+api_key_model_discovery = true
 ```
 
 `OpenAI` 是自定义 Provider ID，大小写要与 `model_provider` 一致。合并配置时修改已有表，
@@ -584,7 +586,11 @@ goals = true
 密钥以明文保存，文件仅供本人读取，不要提交到 Git。接入代理不需要扩大命令沙箱的联网或文件权限
 
 `model_catalog_url` 指向同一网关的 `/v1/models`；更换网关地址时与 `base_url` 一起修改。
-该接口返回当前密钥可见的模型目录，具体格式见 [模型目录](../docs/api.md#模型目录)
+该接口返回当前密钥可见的模型目录，具体格式见 [模型目录](../docs/api.md#模型目录)。
+Codex 使用代理密钥认证时，需同时配置 `model_catalog_url` 并开启 `api_key_model_discovery`，
+才会用网关目录替换内置模型列表，Kimi 等非 GPT 模型随之出现在 `/model` 中。
+该开关从 Codex 0.161.0 起默认开启，0.155.0 至 0.160.0 需显式写入。
+内置 `openai` Provider 的目录地址只接受 ChatGPT 域名，接入网关须使用自定义 Provider
 
 V2 远程压缩通过 Responses 接口发送 `compaction_trigger`，网关和上游需支持该协议。
 若 Provider ID 改为 `custom`，相应能力配置也要改到 `[model_providers.custom.capabilities]`

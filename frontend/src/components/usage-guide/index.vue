@@ -35,6 +35,10 @@ const troubleshooting = computed(() => [
     detail: t('guide.troubleshooting.image'),
   },
   {
+    title: t('guide.troubleshooting.modelsTitle'),
+    detail: t('guide.troubleshooting.models'),
+  },
+  {
     title: '5173/dev/v1',
     code: true,
     detail: t('guide.troubleshooting.devProxy'),
@@ -64,7 +68,7 @@ const troubleshooting = computed(() => [
     </ZCard>
 
     <ZCard :title="t('guide.models.title')" :description="t('guide.models.description')">
-      <GuideModelsDiagram />
+      <GuideModelsDiagram :api-base-url="apiBaseUrl" />
     </ZCard>
 
     <ZCard :title="t('guide.troubleshooting.title')">

@@ -63,8 +63,11 @@
       "defaultDetail": "写在 config.toml 顶层，新会话默认使用",
       "once": "单次启动指定",
       "onceDetail": "只对本次启动生效，不修改配置文件",
-      "snippet": "设置默认模型的 config.toml 示例",
-      "keepProvider": "其余字段保持配置窗口生成的内容"
+      "snippet": "拉取模型列表并设置默认模型的 config.toml 示例",
+      "keepProvider": "其余字段保持配置窗口生成的内容",
+      "requirements": "拉取模型列表需要的配置",
+      "catalogUrl": "写在当前自定义 Provider 中，Codex 从这个地址拉取模型列表",
+      "discovery": "Codex 0.161.0 起默认开启，更早版本需要写上这一行"
     },
     "troubleshooting": {
       "title": "常见问题",
@@ -74,6 +77,8 @@
       "version": "客户端低于管理员设置的最低版本，更新 Codex 后重试",
       "imageTitle": "没有生图工具",
       "image": "CC Switch 导入不含生图设置，改用手动合并的完整配置",
+      "modelsTitle": "模型列表只有 GPT",
+      "models": "确认当前 Provider 中有 model_catalog_url，并开启 api_key_model_discovery，再完全退出重启",
       "devProxy": "这是开发代理地址，日常使用改成后端或 HTTPS 地址",
       "websocketTitle": "WebSocket 连接失败",
       "websocket": "确认反向代理允许 Upgrade，或把 supports_websockets 改回 false"
