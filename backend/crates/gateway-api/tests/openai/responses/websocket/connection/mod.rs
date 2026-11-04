@@ -1,6 +1,7 @@
 //! Responses WebSocket 连接生命周期与多轮请求边界测试
 
 mod middleware;
+mod transport;
 
 use std::{
     fmt,
@@ -48,6 +49,7 @@ use crate::openai::{api_router, authenticated_client};
 
 #[derive(Default)]
 struct CrossingLimitTrace {
+    reconnect_for_replay: AtomicBool,
     release_terminal: tokio::sync::Notify,
     starts: AtomicUsize,
     inputs: Mutex<Vec<Value>>,
@@ -73,7 +75,9 @@ impl ExecutionSession for CrossingLimitSession {
             if !self.terminal_emitted {
                 self.trace.release_terminal.notified().await;
                 self.terminal_emitted = true;
-                return Ok(Some(crossing_limit_terminal_batch()));
+                return Ok(Some(crossing_limit_terminal_batch(
+                    self.trace.reconnect_for_replay.load(Ordering::Acquire),
+                )));
             }
             self.finalized = true;
             self.trace.finalized.store(true, Ordering::Release);
@@ -196,8 +200,8 @@ fn crossing_limit_started_batch() -> CoordinatedEvent {
         .expect("started WebSocket batch")
 }
 
-fn crossing_limit_terminal_batch() -> CoordinatedEvent {
-    let completed = ProviderEvent::wire(
+fn crossing_limit_terminal_batch(reconnect: bool) -> CoordinatedEvent {
+    let mut completed = ProviderEvent::wire(
         ProtocolWireEvent::json(
             "openai",
             Some("response.completed".to_owned()),
@@ -206,12 +210,20 @@ fn crossing_limit_terminal_batch() -> CoordinatedEvent {
                 "response": {
                     "id": "resp_ws_crossing_limit",
                     "model": "model-a",
+                    "output": [],
                     "status": "completed"
                 }
             }),
         )
         .expect("completed wire"),
     );
+    if reconnect {
+        completed.attach_session_update(
+            gateway_core::operation::ProviderSessionState::new("openai", serde_json::Map::new())
+                .unwrap()
+                .with_websocket_reconnect(),
+        );
+    }
     CoordinatedEvent::try_batch(vec![completed], CommitRequirement::AlreadyCommitted)
         .expect("terminal WebSocket batch")
 }
@@ -311,6 +323,7 @@ fn test_connection(stall_writes: bool) -> PumpHarness {
         dropped: Arc::clone(&dropped),
     };
     let connection = spawn_connection(
+        tokio::sync::watch::channel(tokio::time::Instant::now()).0,
         socket,
         Arc::from("ws_test"),
         cancellation.clone(),
@@ -557,7 +570,7 @@ async fn outbound_commands_are_written_in_acknowledged_order() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn stalled_write_times_out_at_three_hundred_seconds_and_aborts_the_pump() {
+async fn stalled_business_write_cannot_block_the_heartbeat_write_deadline() {
     let PumpHarness {
         mut connection,
         incoming: _incoming,
@@ -566,6 +579,7 @@ async fn stalled_write_times_out_at_three_hundred_seconds_and_aborts_the_pump() 
         ..
     } = test_connection(true);
     let request_id = Arc::<str>::from("req_test");
+    let started = tokio::time::Instant::now();
 
     let error = connection
         .send_text(
@@ -573,12 +587,14 @@ async fn stalled_write_times_out_at_three_hundred_seconds_and_aborts_the_pump() 
             WriteContext::request(&request_id, FramePhase::First),
         )
         .await
-        .expect_err("stalled write must time out");
+        .expect_err("heartbeat deadline must interrupt the stalled business write");
     tokio::task::yield_now().await;
 
-    assert!(
-        matches!(error, ConnectionWriteError::Timeout { timeout } if timeout == Duration::from_secs(300))
-            && dropped.load(Ordering::Acquire)
+    assert!(matches!(error, ConnectionWriteError::Closed) && dropped.load(Ordering::Acquire));
+    assert_eq!(started.elapsed(), Duration::from_secs(25 + 5));
+    assert_eq!(
+        connection.wait_for_exit().await,
+        PumpExitReason::WriteTimeout
     );
 }
 
@@ -586,10 +602,19 @@ async fn stalled_write_times_out_at_three_hundred_seconds_and_aborts_the_pump() 
 async fn pump_marks_the_connection_expired_at_sixty_minutes() {
     let PumpHarness {
         mut connection,
-        incoming: _incoming,
-        written: _written,
+        incoming,
+        mut written,
         ..
     } = test_connection(false);
+    let peer = tokio::spawn(async move {
+        while let Some(message) = written.recv().await {
+            if let Message::Ping(payload) = message {
+                incoming
+                    .send(Ok(Message::Pong(payload)))
+                    .expect("reply to Ping");
+            }
+        }
+    });
 
     let event = connection
         .next_event()
@@ -597,6 +622,7 @@ async fn pump_marks_the_connection_expired_at_sixty_minutes() {
         .expect("deadline must emit an event");
 
     assert!(matches!(event, ConnectionEvent::Expired) && connection.is_expired());
+    peer.abort();
 }
 
 #[tokio::test]
@@ -606,6 +632,7 @@ async fn dropping_the_connection_aborts_and_drops_the_socket_owner() {
         incoming: _incoming,
         written: _written,
         dropped,
+        cancellation,
         ..
     } = test_connection(false);
 
@@ -613,6 +640,7 @@ async fn dropping_the_connection_aborts_and_drops_the_socket_owner() {
     tokio::task::yield_now().await;
 
     assert!(dropped.load(Ordering::Acquire));
+    assert!(cancellation.is_cancelled());
 }
 
 #[tokio::test(start_paused = true)]
@@ -799,12 +827,13 @@ async fn start_active_response() -> (
     TestClientSocket,
     tokio::task::JoinHandle<()>,
 ) {
-    start_active_response_with_middleware(None, "/v1/responses").await
+    start_active_response_with(None, "/v1/responses", "integration-test").await
 }
 
-async fn start_active_response_with_middleware(
+async fn start_active_response_with(
     plan: Option<gateway_core::engine::middleware::FrozenMiddlewarePlan>,
     path: &str,
+    user_agent: &str,
 ) -> (
     Arc<CrossingLimitTrace>,
     TestClientSocket,
@@ -855,6 +884,9 @@ async fn start_active_response_with_middleware(
             .parse()
             .expect("authorization"),
     );
+    request
+        .headers_mut()
+        .insert("user-agent", user_agent.parse().unwrap());
     let (mut socket, _) = connect_async(request).await.expect("upgrade WebSocket");
     let response_create = ClientMessage::Text(
         json!({
@@ -888,8 +920,9 @@ async fn start_active_response_with_middleware(
 }
 
 #[tokio::test]
-async fn requests_received_during_an_active_response_should_execute_in_order() {
+async fn replay_reconnect_waits_for_queued_requests_and_writes_the_last_terminal() {
     let (trace, mut socket, server) = start_active_response().await;
+    trace.reconnect_for_replay.store(true, Ordering::Release);
     for input in ["second", "third"] {
         socket
             .send(ClientMessage::Text(
@@ -947,7 +980,13 @@ async fn requests_received_during_an_active_response_should_execute_in_order() {
         vec![json!("hello"), json!("second"), json!("third")]
     );
     assert!(!trace.cancelled.load(Ordering::Acquire));
-    socket.close(None).await.expect("close WebSocket");
+    let next = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("replay close timeout")
+        .unwrap()
+        .unwrap();
+    assert!(matches!(next, ClientMessage::Close(Some(frame))
+        if frame.code == CloseCode::Normal && frame.reason == "Reconnect with full input."));
     server.abort();
 }
 
@@ -1122,7 +1161,7 @@ async fn client_close_should_cancel_active_execution_without_starting_queued_req
 async fn idle_pump_sends_heartbeat_without_bursting_after_a_delay() {
     let PumpHarness {
         connection,
-        incoming: _incoming,
+        incoming,
         mut written,
         ..
     } = test_connection(false);
@@ -1132,6 +1171,10 @@ async fn idle_pump_sends_heartbeat_without_bursting_after_a_delay() {
     tokio::time::advance(Duration::from_secs(25)).await;
     let first = written.recv().await.expect("first heartbeat");
     assert!(matches!(first, Message::Ping(_)));
+    incoming
+        .send(Ok(Message::Pong(vec![1].into())))
+        .expect("reply before scheduler delay");
+    tokio::task::yield_now().await;
 
     tokio::time::advance(Duration::from_secs(120)).await;
     let second = written.recv().await.expect("heartbeat after delay");
@@ -1143,7 +1186,35 @@ async fn idle_pump_sends_heartbeat_without_bursting_after_a_delay() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn missing_pongs_do_not_cancel_the_connection_or_block_business_frames() {
+async fn missing_responses_expire_from_the_first_ping_without_extending_on_repeated_pings() {
+    let PumpHarness {
+        mut connection,
+        incoming,
+        mut written,
+        dropped,
+        cancellation,
+        ..
+    } = test_connection(false);
+    let started = tokio::time::Instant::now();
+    for _ in 0..32 {
+        incoming
+            .send(Ok(Message::Text("queued request".into())))
+            .expect("fill the business queue before probing");
+    }
+
+    assert_eq!(
+        connection.wait_for_exit().await,
+        PumpExitReason::PongTimeout
+    );
+    assert_eq!(started.elapsed(), Duration::from_secs(25 + 30));
+    assert!(matches!(written.try_recv(), Ok(Message::Ping(_))));
+    assert!(matches!(written.try_recv(), Ok(Message::Ping(_))));
+    assert!(dropped.load(Ordering::Acquire));
+    assert!(cancellation.is_cancelled());
+}
+
+#[tokio::test(start_paused = true)]
+async fn business_frames_keep_the_connection_healthy_without_pongs() {
     let PumpHarness {
         mut connection,
         incoming,
@@ -1153,15 +1224,14 @@ async fn missing_pongs_do_not_cancel_the_connection_or_block_business_frames() {
     for _ in 0..13 {
         tokio::time::advance(Duration::from_secs(25)).await;
         assert!(matches!(written.recv().await, Some(Message::Ping(_))));
+        incoming
+            .send(Ok(Message::Text("still connected".into())))
+            .expect("send business frame instead of Pong");
+        assert!(matches!(
+            connection.next_event().await,
+            Some(ConnectionEvent::Text(text)) if text == "still connected"
+        ));
     }
-
-    incoming
-        .send(Ok(Message::Text("still connected".into())))
-        .expect("send business frame after 325 seconds without Pong");
-    assert!(matches!(
-        connection.next_event().await,
-        Some(ConnectionEvent::Text(text)) if text == "still connected"
-    ));
     incoming.send(Ok(Message::Close(None))).expect("close peer");
     assert_eq!(
         connection.wait_for_exit().await,
@@ -1192,7 +1262,7 @@ async fn stalled_heartbeat_can_be_cancelled_without_waiting_for_write_timeout() 
 }
 
 #[tokio::test(start_paused = true)]
-async fn stalled_heartbeat_obeys_the_existing_write_timeout() {
+async fn stalled_heartbeat_uses_a_short_write_timeout() {
     let PumpHarness {
         mut connection,
         incoming: _incoming,
@@ -1205,7 +1275,7 @@ async fn stalled_heartbeat_obeys_the_existing_write_timeout() {
         connection.wait_for_exit().await,
         PumpExitReason::WriteTimeout
     );
-    assert_eq!(started.elapsed(), Duration::from_secs(25 + 300));
+    assert_eq!(started.elapsed(), Duration::from_secs(25 + 5));
     assert!(dropped.load(Ordering::Acquire));
 }
 

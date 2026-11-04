@@ -9,6 +9,7 @@ import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import UsageBillingCell from '@/components/usage/UsageBillingCell.vue'
 import UsageClientIpCell from '@/components/usage/UsageClientIpCell.vue'
+import UsageErrorCell from '@/components/usage/UsageErrorCell.vue'
 import UsageLatencyCell from '@/components/usage/UsageLatencyCell.vue'
 import UsageModelCell from '@/components/usage/UsageModelCell.vue'
 import UsagePerformanceCell from '@/components/usage/UsagePerformanceCell.vue'
@@ -16,7 +17,7 @@ import UsageReasoningEffortCell from '@/components/usage/UsageReasoningEffortCel
 import UsageRouteCell from '@/components/usage/UsageRouteCell.vue'
 import UsageTimeCell from '@/components/usage/UsageTimeCell.vue'
 import UsageTokenCell from '@/components/usage/UsageTokenCell.vue'
-import UsageTransportBadge from '@/components/usage/UsageTransportBadge.vue'
+import UsageTransportCell from '@/components/usage/UsageTransportCell.vue'
 import {
   usageAccountText,
   usageUserAgent,
@@ -47,7 +48,7 @@ const { t } = useI18n({ useScope: 'global' })
   >
     <template #clientApiKeyName="{ displayValue }">
       <span
-        class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+        class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text"
         :title="String(displayValue)"
       >
         {{ displayValue }}
@@ -63,14 +64,14 @@ const { t } = useI18n({ useScope: 'global' })
 
     <template #accountEmail="{ row }">
       <span
-        class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+        class="block max-w-full truncate font-mono text-z-sm leading-none font-bold text-z-text"
         :title="usageAccountText(row)"
       >
         {{ usageAccountText(row) }}
       </span>
       <span
         v-if="row.accountNotes?.trim()"
-        class="mt-1 block max-w-full truncate text-cp-xs font-emphasis text-cp-text-quaternary"
+        class="mt-1 block max-w-full truncate text-z-xs font-emphasis text-z-text-quaternary"
         :title="row.accountNotes"
       >
         {{ row.accountNotes }}
@@ -79,12 +80,14 @@ const { t } = useI18n({ useScope: 'global' })
 
     <template #accountPlanType="{ row }">
       <AccountPlanBadge
-        v-if="row.accountPlanType"
+        v-if="row.accountUpstreamPeer || row.authenticationKind === 'api_key' || row.accountPlanType"
+        :authentication-kind="row.authenticationKind ?? undefined"
+        :upstream-peer="row.accountUpstreamPeer"
         :plan-type="row.accountPlanType"
-        :plan-type-display="row.accountPlanTypeDisplay || row.accountPlanType"
+        :plan-type-display="row.accountPlanTypeDisplay || row.accountPlanType || ''"
         size="sm"
       />
-      <span v-else class="text-cp-text-quaternary">—</span>
+      <span v-else class="text-z-text-quaternary">—</span>
     </template>
 
     <template #createdAtDisplay="{ row }">
@@ -96,7 +99,7 @@ const { t } = useI18n({ useScope: 'global' })
     </template>
 
     <template #userAgent="{ row }">
-      <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary">
+      <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-z-sm leading-[1.4] font-emphasis text-z-text-secondary">
         {{ usageUserAgent(row) }}
       </span>
     </template>
@@ -114,22 +117,11 @@ const { t } = useI18n({ useScope: 'global' })
     </template>
 
     <template #errorMessage="{ row }">
-      <div class="min-w-0 py-0.5" :title="row.errorMessage || row.errorCode || undefined">
-        <code class="block truncate font-mono text-cp-sm font-bold text-cp-error-text">
-          {{ row.errorCode || (row.logicalOutcome === 'incomplete' ? t('usage.error.responseIsNotComplete') : t('usage.error.requestFailed')) }}
-        </code>
-        <p v-if="row.errorMessage" class="mt-1 mb-0 truncate text-cp-xs leading-[1.45] font-emphasis text-cp-text-secondary">
-          {{ row.errorMessage }}
-        </p>
-      </div>
+      <UsageErrorCell :record="row" />
     </template>
 
-    <template #clientTransport="{ row }">
-      <UsageTransportBadge :transport="row.clientTransport" />
-    </template>
-
-    <template #upstreamTransport="{ row }">
-      <UsageTransportBadge :transport="row.upstreamTransport" />
+    <template #transport="{ row }">
+      <UsageTransportCell :upstream="row.upstreamTransport" :client="row.clientTransport" />
     </template>
 
     <template #tokenDetails="{ row }">

@@ -648,11 +648,13 @@ pub struct AccountRequestBucket {
 /// Dashboard 中一个账号的完整用量事实
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashboardAccountUsage {
+    pub upstream: Option<super::upstream_info::ProviderUpstreamInfo>,
     pub account_id: String,
     pub provider_kind: String,
     pub authentication_kind: String,
     pub name: String,
     pub email: Option<String>,
+    pub notes: Option<String>,
     pub plan_type: Option<String>,
     /// Admin 按 Provider 补齐的套餐展示名称
     pub plan_type_display: Option<String>,
@@ -722,6 +724,11 @@ pub struct UsageListRecord {
     pub outcome: RequestOutcome,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub error_kind: Option<String>,
+    pub websocket_close_code: Option<u16>,
+    pub continuation_unavailable_reason: Option<String>,
+    pub upstream_connection_exit_reason: Option<String>,
+    pub recovered: bool,
     pub client_status_code: Option<u16>,
     pub client_api_key_name: Option<String>,
     pub id: String,
@@ -737,6 +744,8 @@ pub struct UsageListRecord {
     /// 请求选号时冻结的账号套餐
     pub provider_account_plan_type: Option<String>,
     pub provider_account_plan_type_display: Option<String>,
+    /// 查询时的互联识别结果，缺少当前摘要时为未知
+    pub provider_account_upstream_peer: Option<bool>,
     pub provider_account_authentication_kind: Option<String>,
     pub upstream_model_id: Option<String>,
     pub upstream_transport: Option<String>,
@@ -778,6 +787,23 @@ pub struct UsageListRecord {
     pub started_at: DateTime<Utc>,
 }
 
+/// 受控请求详情中的上游错误字段，不参与错误分类或普通日志输出
+#[derive(Clone, PartialEq)]
+pub struct UsageUpstreamError {
+    pub code: Option<String>,
+    pub error_type: Option<String>,
+    pub message: Option<String>,
+    pub param: Option<String>,
+    pub close_reason: Option<String>,
+    pub last_event_type: Option<String>,
+}
+
+impl std::fmt::Debug for UsageUpstreamError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("UsageUpstreamError(<restricted>)")
+    }
+}
+
 /// 一次完整模型请求的公共观测记录
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageRecord {
@@ -816,6 +842,11 @@ pub struct UsageRecord {
     pub error_kind: Option<String>,
     pub provider_error_code: Option<String>,
     pub error_message: Option<String>,
+    pub upstream_error: Option<UsageUpstreamError>,
+    pub websocket_close_code: Option<u16>,
+    pub continuation_unavailable_reason: Option<String>,
+    pub upstream_connection_exit_reason: Option<String>,
+    pub recovered: bool,
     pub retry_after_ms: Option<u64>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
@@ -964,6 +995,7 @@ pub struct DiagnosticObservation {
     pub key: String,
     pub name: String,
     pub account_provider_kind: Option<String>,
+    pub account_authentication_kind: Option<String>,
     pub account_plan_type: Option<String>,
     pub request_count: u64,
     pub success_count: u64,
@@ -1260,38 +1292,44 @@ pub struct UsageInsightsHealth {
     pub points: Vec<UsageInsightsHealthPoint>,
 }
 
+/// 一个时间桶内按重叠时长加权的逻辑请求并发
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageConcurrencyPoint {
+    pub bucket_start: DateTime<Utc>,
+    pub average_concurrency: f64,
+    pub peak_concurrency: u64,
+}
+
+/// 请求并发与调度等待的负载指标
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageInsightsLoad {
+    pub average_concurrency: f64,
+    pub peak_concurrency: u64,
+    pub admission_decision_p95_ms: Option<PercentileMilliseconds>,
+    pub account_selection_wait_p95_ms: Option<PercentileMilliseconds>,
+}
+
 /// 洞察性能时间点
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UsageInsightsPerformancePoint {
     pub bucket_start: DateTime<Utc>,
     pub latency_percentiles: LatencyPercentiles,
     pub first_token_latency_percentiles: LatencyPercentiles,
-    pub admission_decision_percentiles: LatencyPercentiles,
-    pub account_selection_wait_percentiles: LatencyPercentiles,
     pub output_throughput_p10: Option<u64>,
     pub output_throughput_p50: Option<u64>,
     pub output_throughput_p90: Option<u64>,
-    pub capacity_utilization_avg_basis_points: Option<u64>,
-    pub capacity_utilization_p95_basis_points: Option<u64>,
+    pub load: UsageInsightsLoad,
 }
 
-/// 洞察性能汇总与可观测覆盖率
+/// 洞察性能汇总
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageInsightsPerformance {
     pub latency_percentiles: LatencyPercentiles,
     pub first_token_latency_percentiles: LatencyPercentiles,
-    pub latency_coverage: f64,
-    pub first_token_coverage: f64,
-    pub admission_decision_percentiles: LatencyPercentiles,
-    pub account_selection_wait_percentiles: LatencyPercentiles,
-    pub admission_decision_coverage: f64,
-    pub account_selection_wait_coverage: f64,
     pub output_throughput_p10: Option<u64>,
     pub output_throughput_p50: Option<u64>,
     pub output_throughput_p90: Option<u64>,
-    pub capacity_utilization_avg_basis_points: Option<u64>,
-    pub capacity_utilization_p95_basis_points: Option<u64>,
-    pub capacity_coverage: f64,
+    pub load: UsageInsightsLoad,
     pub points: Vec<UsageInsightsPerformancePoint>,
 }
 
@@ -1345,12 +1383,93 @@ pub struct UsageInsights {
     pub providers: Vec<ProviderObservation>,
 }
 
+/// 单次洞察查询所需的指标，持久化层据此选择计数、分布与费用状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UsageInsightMetric {
+    Health,
+    Latency,
+    FirstToken,
+    Throughput,
+    Load,
+    Cost,
+    Savings,
+    Cache,
+}
+
+/// 单个指标的时间点，活动计数与指标共用读取快照
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageMetricPoint<T> {
+    pub bucket_start: DateTime<Utc>,
+    pub request_count: u64,
+    pub value: T,
+}
+
+/// 各指标复用时间序列形状，汇总与时间点保留各自的类型
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageMetricSeries<S, P = S> {
+    pub summary: S,
+    pub points: Vec<UsageMetricPoint<P>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageThroughputPercentiles {
+    pub p10: Option<u64>,
+    pub p50: Option<u64>,
+    pub p90: Option<u64>,
+}
+
+/// 成本卡片各视图共同显示的汇总
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageCostSummary {
+    pub estimated_cost: Option<DecimalAmount>,
+    pub cache_savings: Option<DecimalAmount>,
+    pub tier_premium: Option<DecimalAmount>,
+    pub cost_per_successful_request: Option<DecimalAmount>,
+    pub coverage: CostCoverage,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageCostComparison {
+    pub estimated_cost: Option<DecimalAmount>,
+    pub no_cache_cost: Option<DecimalAmount>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageCacheEfficiency {
+    pub input_tokens: u64,
+    pub cached_token_rate: f64,
+    pub cache_hit_request_rate: Option<f64>,
+}
+
+/// 只发布本次请求的指标，未查询的值不伪装成零
+#[derive(Debug, Clone, PartialEq)]
+pub enum UsageInsightData {
+    Health(UsageInsightsHealth),
+    Latency(UsageMetricSeries<LatencyPercentiles>),
+    FirstToken(UsageMetricSeries<LatencyPercentiles>),
+    Throughput(UsageMetricSeries<UsageThroughputPercentiles>),
+    Load(UsageMetricSeries<UsageInsightsLoad>),
+    Cost(UsageMetricSeries<UsageCostSummary, UsageCostComparison>),
+    Savings(UsageMetricSeries<UsageCostSummary, Option<DecimalAmount>>),
+    Cache(UsageMetricSeries<UsageCostSummary, UsageCacheEfficiency>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageInsight {
+    pub analytics: AnalyticsMetadata,
+    pub granularity: Granularity,
+    pub data: UsageInsightData,
+}
+
 /// 已完成分母计算的诊断项
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiagnosticsItem {
     pub key: String,
     pub name: String,
+    pub account_authentication_kind: Option<String>,
     pub account_plan_type: Option<String>,
+    /// 仅账号维度补充当前互联识别结果
+    pub account_upstream_peer: Option<bool>,
     pub account_plan_type_display: Option<String>,
     pub request_count: u64,
     pub success_count: u64,

@@ -16,9 +16,9 @@ import UsageRecordStatusFilter from '@/components/usage/UsageRecordStatusFilter.
 import UsageRouteCell from '@/components/usage/UsageRouteCell.vue'
 import UsageTimeCell from '@/components/usage/UsageTimeCell.vue'
 import UsageTokenCell from '@/components/usage/UsageTokenCell.vue'
-import UsageTransportBadge from '@/components/usage/UsageTransportBadge.vue'
+import UsageTransportCell from '@/components/usage/UsageTransportCell.vue'
 
-defineProps<{ rows: KeyUsageRecord[], pagination: Pagination, loading: boolean, error: string, stale: boolean }>()
+defineProps<{ rows: KeyUsageRecord[], pagination: Pagination, loading: boolean }>()
 
 defineEmits<{ pageChange: [page: number], pageSizeChange: [size: number] }>()
 
@@ -37,11 +37,8 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
         <ZTableColumnSettings :options="columnOptions" @change="setColumnVisible" @reorder="setColumnOrder" @reset="resetColumns" />
       </div>
     </template>
-    <p v-if="error || stale" role="status" class="mt-0 mb-3 text-cp-sm text-cp-error-text">
-      {{ error || t('usage.records.refreshFailed') }}
-    </p>
     <div class="flex h-120 min-h-0 overflow-hidden">
-      <ZTable class="min-w-0 flex-1" :columns="visibleColumns" :data="rows" :loading="loading" :empty-text="error ? t('usage.records.loadFailed') : t('usage.records.noRecordsMatchTheseFilters')">
+      <ZTable class="min-w-0 flex-1" :columns="visibleColumns" :data="rows" :loading="loading" :empty-text="t('usage.records.noRecordsMatchTheseFilters')">
         <template #model="{ row }">
           <UsageModelCell :record="row" />
         </template>
@@ -51,15 +48,12 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
         <template #route="{ row }">
           <UsageRouteCell :record="row" />
         </template>
-        <template #upstreamTransport="{ row }">
-          <UsageTransportBadge :transport="row.upstreamTransport" />
-        </template>
-        <template #clientTransport="{ row }">
-          <UsageTransportBadge :transport="row.clientTransport" />
+        <template #transport="{ row }">
+          <UsageTransportCell :upstream="row.upstreamTransport" :client="row.clientTransport" />
         </template>
         <template #tokenDetails="{ row }">
           <UsageTokenCell v-if="row.tokenDetails" :record="{ tokenDetails: row.tokenDetails }" />
-          <span v-else class="text-cp-text-tertiary">—</span>
+          <span v-else class="text-z-text-tertiary">—</span>
         </template>
         <template #billing="{ row }">
           <UsageBillingCell :record="row" />
@@ -77,7 +71,7 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
           <UsageClientIpCell :record="row" />
         </template>
         <template #userAgent="{ row }">
-          <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary">{{ row.userAgent || '—' }}</span>
+          <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-z-sm leading-[1.4] font-emphasis text-z-text-secondary">{{ row.userAgent || '—' }}</span>
         </template>
       </ZTable>
     </div>

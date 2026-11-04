@@ -66,6 +66,36 @@ fn usage_window_should_not_fallback_to_short_daily_or_incomplete_windows() {
 }
 
 #[test]
+fn usage_window_should_preserve_provider_rolling_daily_statistics() {
+    let mut rolling = usage_window("rolling-day", "shortTerm", 86_400);
+    rolling.reset_at = None;
+    rolling.used_percent = None;
+    let mut quota = usage_quota(vec![rolling.clone()]);
+    assert_eq!(
+        selected_usage_window(&quota),
+        Some(("rolling-day", AccountUsagePeriod::Daily))
+    );
+
+    quota.limit_reached = true;
+    quota.apply_limit_reached_display();
+    assert_eq!(
+        selected_usage_window(&quota),
+        Some(("rolling-day", AccountUsagePeriod::Daily))
+    );
+
+    quota
+        .windows
+        .push(usage_window("week", "shortTerm", 7 * 86_400));
+    assert_eq!(
+        selected_usage_window(&quota),
+        Some(("week", AccountUsagePeriod::Weekly))
+    );
+
+    rolling.local_usage_attribution = QuotaLocalUsageAttribution::Unavailable;
+    assert_eq!(usage_quota(vec![rolling]).usage_window(), None);
+}
+
+#[test]
 fn usage_window_should_preserve_provider_order_for_equal_periods() {
     let quota = usage_quota(vec![
         usage_window("first-week", "shortTerm", 7 * 86_400),
@@ -86,6 +116,7 @@ fn selected_usage_window(quota: &ProviderQuota) -> Option<(&str, AccountUsagePer
 
 fn usage_quota(windows: Vec<ProviderQuotaWindow>) -> ProviderQuota {
     ProviderQuota {
+        upstream: None,
         credits: None,
         plan_type: None,
         observed_at: None,
@@ -98,6 +129,7 @@ fn usage_quota(windows: Vec<ProviderQuotaWindow>) -> ProviderQuota {
 
 fn usage_window(key: &str, group: &str, seconds: u64) -> ProviderQuotaWindow {
     ProviderQuotaWindow {
+        upstream: None,
         key: key.to_owned(),
         group: group.to_owned(),
         label: key.to_owned(),
@@ -136,6 +168,7 @@ fn usage_window(key: &str, group: &str, seconds: u64) -> ProviderQuotaWindow {
 #[test]
 fn dashboard_quota_should_preserve_unknown_and_actual_window_facts() {
     let mut quota = ProviderQuota {
+        upstream: None,
         credits: None,
         plan_type: None,
         observed_at: None,
@@ -148,6 +181,7 @@ fn dashboard_quota_should_preserve_unknown_and_actual_window_facts() {
     assert!(quota.representative_used_percent().is_none());
 
     let rolling = ProviderQuotaWindow {
+        upstream: None,
         key: "provider_rolling".to_owned(),
         group: "requests".to_owned(),
         label: "Provider rolling window".to_owned(),
@@ -180,6 +214,7 @@ fn dashboard_quota_should_preserve_unknown_and_actual_window_facts() {
     quota.windows.insert(
         0,
         ProviderQuotaWindow {
+            upstream: None,
             key: "model_specific".to_owned(),
             used_percent: Some(100.0),
             local_usage_attribution: QuotaLocalUsageAttribution::Unavailable,

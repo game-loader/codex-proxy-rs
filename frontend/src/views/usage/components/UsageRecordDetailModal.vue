@@ -25,11 +25,16 @@ import { attemptOutcomeClass, attemptOutcomeText, displayValue, fieldLabelClass,
 import DiagnosticsDownloadButton from './DiagnosticsDownloadButton.vue'
 import UsageDetailCodePanel from './UsageDetailCodePanel.vue'
 import UsageDetailFieldGrid from './UsageDetailFieldGrid.vue'
+import UsageDetailState from './UsageDetailState.vue'
 import UsageStatusCodeBadge from './UsageStatusCodeBadge.vue'
 
 const props = defineProps<{
   record: UsageRecordDetail | null
+  loading?: boolean
+  error?: string
 }>()
+
+const emit = defineEmits<{ retry: [] }>()
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -52,8 +57,8 @@ const latencyDetails = computed(() => props.record
   ? usageLatencyDetails(props.record)
   : null)
 
-const panelClass = 'min-w-0 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5'
-const panelTitleClass = 'm-0 text-cp-sm leading-none font-heavy text-cp-text-secondary'
+const panelClass = 'min-w-0 rounded-z-card bg-z-fill-quaternary px-4 py-3.5'
+const panelTitleClass = 'm-0 text-z-sm leading-none font-heavy text-z-text-secondary'
 
 const accountDisplay = computed(() => props.record
   ? usageAccountText(props.record)
@@ -160,11 +165,15 @@ const clientUpstreamItems = computed(() => [
       : '—',
     mono: true,
   },
-  {
-    label: t('usage.billing.serviceLevel'),
-    value: props.record?.serviceTier,
-    mono: true,
-  },
+  ...(props.record?.serviceTier
+    ? [
+        {
+          label: t('usage.billing.serviceLevel'),
+          value: props.record?.serviceTier,
+          mono: true,
+        },
+      ]
+    : []),
   {
     label: t('usage.request.eventType'),
     value: props.record?.kind,
@@ -198,12 +207,16 @@ const identifierItems = computed(() => [
     mono: true,
     wrap: true,
   },
-  {
-    label: t('usage.error.upstreamRequestId'),
-    value: props.record?.upstreamRequestId,
-    mono: true,
-    wrap: true,
-  },
+  ...(props.record?.upstreamRequestId
+    ? [
+        {
+          label: t('usage.error.upstreamRequestId'),
+          value: props.record?.upstreamRequestId,
+          mono: true,
+          wrap: true,
+        },
+      ]
+    : []),
   {
     label: t('usage.request.accountId'),
     value: props.record?.accountId,
@@ -553,7 +566,8 @@ const tokenDonutOption = computed<EChartsOption>(() => {
     type="info"
     width="64rem"
   >
-    <div v-if="record" class="grid min-w-0 gap-3">
+    <UsageDetailState v-if="loading || error" :loading="!!loading" :error="error" @retry="emit('retry')" />
+    <div v-else-if="record" class="grid min-w-0 gap-3">
       <section class="grid min-w-0 gap-3 lg:grid-cols-2">
         <section :class="panelClass">
           <h3 :class="panelTitleClass">
@@ -598,7 +612,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
             <h3 :class="panelTitleClass">
               {{ t('common.units.tokens') }}
             </h3>
-            <span v-if="!tokenChartComplete" class="text-cp-xs text-cp-text-tertiary">{{ t('usage.request.incompleteDetails') }}</span>
+            <span v-if="!tokenChartComplete" class="text-z-xs text-z-text-tertiary">{{ t('usage.request.incompleteDetails') }}</span>
           </div>
           <div
             class="mt-3 grid min-h-38 min-w-0 flex-1 grid-cols-1 content-center items-center gap-3 sm:grid-cols-[150px_minmax(0,1fr)]"
@@ -607,11 +621,11 @@ const tokenDonutOption = computed<EChartsOption>(() => {
               <BaseChart :option="tokenDonutOption" :height="152" />
               <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <div class="grid text-center">
-                  <span class="text-cp-xs leading-none font-bold text-cp-text-quaternary">
+                  <span class="text-z-xs leading-none font-bold text-z-text-quaternary">
                     {{ t('usage.request.total') }}
                   </span>
                   <strong
-                    class="mt-1 font-mono text-[16px] leading-none font-extrabold tabular-nums text-cp-text"
+                    class="mt-1 font-mono text-[16px] leading-none font-extrabold tabular-nums text-z-text"
                   >
                     {{ tokenDetails?.totalTokensDisplay ?? '—' }}
                   </strong>
@@ -671,14 +685,14 @@ const tokenDonutOption = computed<EChartsOption>(() => {
           </template>
           <template #accountLabel="{ row }">
             <span
-              class="block max-w-full truncate font-mono text-cp-sm font-bold text-cp-text"
+              class="block max-w-full truncate font-mono text-z-sm font-bold text-z-text"
               :title="row.accountId || ''"
             >
               {{ row.accountLabel }}
             </span>
           </template>
           <template #latencyMs="{ row }">
-            <span class="font-mono font-bold tabular-nums text-cp-text">
+            <span class="font-mono font-bold tabular-nums text-z-text">
               {{ formatDuration(row.latencyMs) }}
             </span>
           </template>
@@ -708,7 +722,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
     </div>
 
     <template #footer>
-      <DiagnosticsDownloadButton v-if="record" :request-id="record.requestId" :active="open" />
+      <DiagnosticsDownloadButton :request-id="record?.requestId" :active="open && !loading" />
       <ZButton type="primary" @click="open = false">
         {{ t('common.actions.close') }}
       </ZButton>
@@ -727,6 +741,6 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 }
 
 .attempt-table :deep(tbody td) {
-  background-color: var(--cp-color-fill-tertiary);
+  background-color: var(--z-color-fill-tertiary);
 }
 </style>

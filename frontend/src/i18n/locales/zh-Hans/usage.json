@@ -61,21 +61,21 @@
     },
     "performance": {
       "ttftHelp": "TTFT：首个 Token 耗时",
-      "scheduling": "调度",
+      "concurrency": "并发",
+      "averageConcurrency": "平均并发",
+      "peakConcurrency": "峰值并发",
+      "load": "负载",
+      "waitTime": "耗时",
       "admissionP95": "准入 P95",
-      "accountSelectionP95": "选号 P95",
-      "capacityP95": "容量 P95",
-      "decisionCoverage": "判定覆盖",
-      "accountSelectionCoverage": "选号覆盖",
-      "capacityCoverage": "容量覆盖",
+      "accountSelectionP95": "选号等待 P95",
       "title": "响应性能",
-      "description": "延迟、速率与调度分位",
+      "description": "总耗时、首个 Token 耗时、速率与负载",
       "performanceIndicators": "性能指标",
       "loading": "正在加载性能数据",
       "noTtftSamples": "当前范围暂无 TTFT 样本",
       "noThroughput": "当前范围暂无速率样本",
-      "noScheduling": "当前范围暂无调度或容量样本",
-      "noLatency": "当前范围暂无延迟样本"
+      "noLatency": "当前范围暂无延迟样本",
+      "noLoad": "当前范围暂无负载数据"
     },
     "reasoning": {
       "subagentRequest": "子代理请求",
@@ -111,15 +111,15 @@
       "reasoningEffort": "推理强度",
       "endpoint": "端点",
       "upstream": "上游",
-      "access": "接入",
       "cost": "费用",
       "latency": "延迟",
       "time": "时间",
       "keyName": "密钥名称",
       "subscription": "订阅",
-      "platformType": "平台"
+      "platformType": "平台",
+      "transport": "传输"
     },
-    "outputThroughput": "输出速率",
+    "outputThroughput": "速率",
     "noValidSample": "无有效样本",
     "notReachable": "不可达",
     "unstable": "不稳定",
@@ -185,8 +185,6 @@
     "records": {
       "requestLog": "请求日志",
       "currentRequestRecord": "当前请求记录",
-      "refreshFailed": "请求日志刷新失败，暂时保留上次结果",
-      "loadFailed": "请求日志加载失败，请点击顶部刷新重试",
       "noRecordsMatchTheseFilters": "所选条件下暂无记录"
     },
     "page": {
@@ -197,13 +195,10 @@
       "changesInUsageOverTime": "用量随时间的变化",
       "requestHealthTimeline": "请求健康时间线",
       "updated": "更新于 {asOfDisplay}",
-      "temporarilyRetainLastResult": "，暂时保留上次结果",
-      "clickRefreshAtTopToTryAgain": "，请点击顶部刷新重试",
       "description": "查看请求用量、性能趋势与调用错误记录",
       "dateRangeLabel": "统计日期范围，仅可选择最近 31 天",
       "requestDetails": "请求记录",
       "recordsDescription": "成功请求与失败请求记录",
-      "failedToLoad": "加载失败：{error}",
       "noRequestsMatchTheseFilters": "所选条件下暂无请求记录",
       "viewErrorDetails": "查看错误详情",
       "viewUsageRecordDetails": "查看使用记录详情"
@@ -300,7 +295,27 @@
       "attempt": "尝试 {index}",
       "diagnosticData": "诊断数据",
       "responseContent": "响应内容",
-      "metadata": "元数据"
+      "metadata": "元数据",
+      "recovered": "后续已恢复",
+      "summary": {
+        "upstreamRestart": "上游关闭连接（服务重启）",
+        "upstreamBusy": "上游关闭连接（稍后重试）",
+        "messageTooLarge": "上游因消息过大关闭连接",
+        "upstreamClosed": "上游在响应完成前关闭连接",
+        "processInterrupted": "请求执行中断，未记录到最终结果",
+        "continuationExpired": "续接连接已到期，需要完整重发",
+        "continuationUnavailable": "续接状态不可用，需要完整重发",
+        "connectionLimit": "上游连接已到时限，需要重新连接",
+        "contextTooLong": "上下文超过模型限制",
+        "quotaExceeded": "上游可用额度不足",
+        "rateLimited": "上游请求频率受限",
+        "serverOverloaded": "上游服务负载过高"
+      },
+      "websocketCloseCode": "WS 关闭码",
+      "lastEventType": "最后事件",
+      "retryAfter": "重试等待",
+      "closeReason": "关闭原因",
+      "gatewayMessage": "网关摘要"
     },
     "insights": {
       "useStatisticalObservations": "使用统计观测"
@@ -337,7 +352,8 @@
       "incompleteDetails": "明细不完整",
       "total": "总计",
       "requestContent": "请求内容",
-      "inProgress": "进行中"
+      "inProgress": "进行中",
+      "loadingDetails": "正在加载请求详情"
     },
     "successfulRequest": "成功请求",
     "withinFilterRange": "筛选范围内",
@@ -347,6 +363,7 @@
     "averageTimeTaken": "平均耗时",
     "successfulRequestAverage": "成功请求平均值",
     "usageOverview": "使用概览",
-    "noUsageRecords": "暂无使用记录"
+    "noUsageRecords": "暂无使用记录",
+    "transportDirection": "上游 {upstream} · 接入 {client}"
   }
 }

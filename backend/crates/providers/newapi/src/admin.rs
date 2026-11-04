@@ -313,6 +313,7 @@ impl ProviderAdmin for NewApiAdminProvider {
         _request: ProviderQuotaRequest,
     ) -> Result<ProviderQuota, ProviderAdminError> {
         Ok(ProviderQuota {
+            upstream: None,
             plan_type: None,
             observed_at: None,
             refresh_token_expires_at: None,

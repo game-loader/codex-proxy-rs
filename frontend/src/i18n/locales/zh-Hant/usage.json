@@ -61,21 +61,21 @@
     },
     "performance": {
       "ttftHelp": "TTFT：首個 Token 耗時",
-      "scheduling": "調度",
+      "concurrency": "並發",
+      "averageConcurrency": "平均並發",
+      "peakConcurrency": "峰值並發",
+      "load": "負載",
+      "waitTime": "耗時",
       "admissionP95": "准入 P95",
-      "accountSelectionP95": "選號 P95",
-      "capacityP95": "容量 P95",
-      "decisionCoverage": "判定覆蓋",
-      "accountSelectionCoverage": "選號覆蓋",
-      "capacityCoverage": "容量覆蓋",
+      "accountSelectionP95": "選號等待 P95",
       "title": "響應性能",
-      "description": "延遲、速率與調度分位",
+      "description": "總耗時、首個 Token 耗時、速率與負載",
       "performanceIndicators": "性能指標",
       "loading": "正在加載性能數據",
       "noTtftSamples": "當前範圍暫無 TTFT 樣本",
       "noThroughput": "當前範圍暫無速率樣本",
-      "noScheduling": "當前範圍暫無調度或容量樣本",
-      "noLatency": "當前範圍暫無延遲樣本"
+      "noLatency": "當前範圍暫無延遲樣本",
+      "noLoad": "當前範圍暫無負載資料"
     },
     "reasoning": {
       "subagentRequest": "子代理請求",
@@ -111,15 +111,15 @@
       "reasoningEffort": "推理強度",
       "endpoint": "端點",
       "upstream": "上游",
-      "access": "接入",
       "cost": "費用",
       "latency": "延遲",
       "time": "時間",
       "keyName": "密鑰名稱",
       "subscription": "訂閱",
-      "platformType": "平臺"
+      "platformType": "平臺",
+      "transport": "傳輸"
     },
-    "outputThroughput": "輸出速率",
+    "outputThroughput": "速率",
     "noValidSample": "無有效樣本",
     "notReachable": "不可達",
     "unstable": "不穩定",
@@ -185,8 +185,6 @@
     "records": {
       "requestLog": "請求日誌",
       "currentRequestRecord": "當前請求記錄",
-      "refreshFailed": "請求日誌刷新失敗，暫時保留上次結果",
-      "loadFailed": "請求日誌加載失敗，請點擊頂部刷新重試",
       "noRecordsMatchTheseFilters": "所選條件下暫無記錄"
     },
     "page": {
@@ -197,13 +195,10 @@
       "changesInUsageOverTime": "用量隨時間的變化",
       "requestHealthTimeline": "請求健康時間線",
       "updated": "更新於 {asOfDisplay}",
-      "temporarilyRetainLastResult": "，暫時保留上次結果",
-      "clickRefreshAtTopToTryAgain": "，請點擊頂部刷新重試",
       "description": "查看請求用量、性能趨勢與調用錯誤記錄",
       "dateRangeLabel": "統計日期範圍，僅可選擇最近 31 天",
       "requestDetails": "請求記錄",
       "recordsDescription": "成功請求與失敗請求記錄",
-      "failedToLoad": "加載失敗：{error}",
       "noRequestsMatchTheseFilters": "所選條件下暫無請求記錄",
       "viewErrorDetails": "查看錯誤詳情",
       "viewUsageRecordDetails": "查看使用記錄詳情"
@@ -300,7 +295,27 @@
       "attempt": "嘗試 {index}",
       "diagnosticData": "診斷數據",
       "responseContent": "響應內容",
-      "metadata": "元數據"
+      "metadata": "元數據",
+      "recovered": "後續已恢復",
+      "summary": {
+        "upstreamRestart": "上游關閉連接（服務重啟）",
+        "upstreamBusy": "上游關閉連接（稍後重試）",
+        "messageTooLarge": "上游因消息過大關閉連接",
+        "upstreamClosed": "上游在響應完成前關閉連接",
+        "processInterrupted": "請求執行中斷，未記錄到最終結果",
+        "continuationExpired": "續接連接已到期，需要完整重發",
+        "continuationUnavailable": "續接狀態不可用，需要完整重發",
+        "connectionLimit": "上游連接已到時限，需要重新連接",
+        "contextTooLong": "上下文超過模型限制",
+        "quotaExceeded": "上游可用額度不足",
+        "rateLimited": "上游請求頻率受限",
+        "serverOverloaded": "上游服務負載過高"
+      },
+      "websocketCloseCode": "WS 關閉碼",
+      "lastEventType": "最後事件",
+      "retryAfter": "重試等待",
+      "closeReason": "關閉原因",
+      "gatewayMessage": "閘道摘要"
     },
     "insights": {
       "useStatisticalObservations": "使用統計觀測"
@@ -337,7 +352,8 @@
       "incompleteDetails": "明細不完整",
       "total": "總計",
       "requestContent": "請求內容",
-      "inProgress": "進行中"
+      "inProgress": "進行中",
+      "loadingDetails": "正在加載請求詳情"
     },
     "successfulRequest": "成功請求",
     "withinFilterRange": "篩選範圍內",
@@ -347,6 +363,7 @@
     "averageTimeTaken": "平均耗時",
     "successfulRequestAverage": "成功請求平均值",
     "usageOverview": "使用概覽",
-    "noUsageRecords": "暫無使用記錄"
+    "noUsageRecords": "暫無使用記錄",
+    "transportDirection": "上游 {upstream} · 接入 {client}"
   }
 }

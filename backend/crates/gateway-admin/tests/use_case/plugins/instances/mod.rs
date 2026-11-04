@@ -49,6 +49,7 @@ use serde_json::json;
 
 use super::TestPluginPorts;
 
+mod configuration;
 mod queries;
 
 const OLD_ARTIFACT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -63,6 +64,10 @@ enum MigrationBehavior {
 
 #[async_trait]
 impl gateway_admin::ports::plugins::PluginPackageInspector for LifecycleFixture {
+    fn compatibility_host_fingerprint(&self) -> Result<String, AdminError> {
+        Ok("test-host".into())
+    }
+
     fn api_deprecations(
         &self,
         metadata: &PluginArtifactMetadata,
@@ -282,6 +287,22 @@ impl ExtensionSetLease for Lease {
 
 #[async_trait]
 impl PluginPreparation for LifecycleFixture {
+    async fn prepare_confirmed(
+        &self,
+        snapshot: PluginInstanceSnapshot,
+        confirmation: gateway_admin::model::plugins::instances::PluginCompatibilityConfirmation,
+    ) -> Result<ExtensionSetReference, AdminError> {
+        assert_eq!(confirmation.host_fingerprint, "test-host");
+        assert!(
+            snapshot
+                .instances
+                .iter()
+                .any(|instance| instance.id == confirmation.instance_id
+                    && instance.artifact_sha256 == confirmation.artifact_sha256)
+        );
+        self.prepare(snapshot).await
+    }
+
     async fn configuration_ready(
         &self,
         instance: PluginInstance,
@@ -731,6 +752,7 @@ fn rollback_input() -> RollbackPluginInstance {
 
 fn input() -> ConfigurePluginInstance {
     ConfigurePluginInstance {
+        compatibility_confirmation: None,
         replace_instances: Vec::new(),
         creation_id: None,
         expected_revision: None,
@@ -738,7 +760,7 @@ fn input() -> ConfigurePluginInstance {
         artifact_sha256: NEW_ARTIFACT.into(),
         enabled: true,
         configuration: json!({}),
-        secrets: None,
+        secrets: Default::default(),
         bindings: vec![],
     }
 }
@@ -921,6 +943,8 @@ async fn configuration_retry_reuses_creation_id_and_rejects_changed_draft() {
         // 此用例验证创建重试，使用不需要私有状态迁移的固定版本
         value.artifact_sha256 = OLD_ARTIFACT.into();
         value.enabled = false;
+        value.secrets =
+            serde_json::from_value(json!({"token": "saved-token", "absent": null})).unwrap();
         value
     };
     let created = service
@@ -934,9 +958,26 @@ async fn configuration_retry_reuses_creation_id_and_rejects_changed_draft() {
     assert_eq!(created.instance.id, creation_id);
     assert_eq!(retried.instance.id, creation_id);
     assert_eq!(fixture.snapshot().instances.len(), 2);
+    use secrecy::ExposeSecret as _;
+    assert_eq!(
+        retried.instance.secrets["token"].expose_secret(),
+        "saved-token"
+    );
+    assert!(!retried.instance.secrets.contains_key("absent"));
     let before = fixture.snapshot().config_revision;
     let mut changed = request();
     changed.name = "changed draft".into();
+    let error = service
+        .configure_instance(None, changed, &context())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), AdminErrorKind::Conflict);
+    assert_eq!(fixture.snapshot().config_revision, before);
+    let mut changed = request();
+    changed
+        .secrets
+        .insert("token".into(), Some("different-token".into()));
     let error = service
         .configure_instance(None, changed, &context())
         .await
@@ -1415,23 +1456,6 @@ async fn version_switch_preparation_failure_preserves_current_and_saved_settings
 }
 
 #[tokio::test]
-async fn version_edit_preserves_the_target_versions_secrets_when_omitted() {
-    use secrecy::ExposeSecret as _;
-    let fixture = LifecycleFixture::new(MigrationBehavior::Succeed);
-    let before = fixture.snapshot();
-    let mut request = input();
-    request.secrets = None;
-    let result = service(fixture, Arc::new(Published::default()))
-        .configure_instance(Some(&before.instances[0].id), request, &context())
-        .await
-        .unwrap();
-    assert_eq!(
-        result.instance.secrets["token"].expose_secret(),
-        "old-version-secret"
-    );
-}
-
-#[tokio::test]
 async fn rollback_requires_a_saved_configuration_instead_of_reusing_incompatible_current_settings()
 {
     let fixture = LifecycleFixture::new(MigrationBehavior::Succeed);
@@ -1616,7 +1640,7 @@ async fn transient_compatibility_check_failure_can_be_retried() {
 }
 
 #[tokio::test]
-async fn compatibility_warning_allows_enabling_and_persists_after_success() {
+async fn incompatible_start_requires_confirmation_and_preserves_the_warning() {
     let fixture = LifecycleFixture::new(MigrationBehavior::Succeed);
     {
         let mut data = fixture.data.lock().unwrap();
@@ -1629,6 +1653,21 @@ async fn compatibility_warning_allows_enabling_and_persists_after_success() {
     assert!(view.load_error.is_none());
     let mut request = input();
     request.artifact_sha256 = OLD_ARTIFACT.into();
+    let error = service
+        .configure_instance(Some(&view.instance.id), request, &context())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), AdminErrorKind::Conflict);
+    assert!(fixture.data.lock().unwrap().saves.is_empty());
+    assert!(fixture.data.lock().unwrap().prepared_snapshots.is_empty());
+    let plan = service
+        .version_plan(&view.instance.id, OLD_ARTIFACT)
+        .await
+        .unwrap();
+    let mut request = input();
+    request.artifact_sha256 = OLD_ARTIFACT.into();
+    request.compatibility_confirmation = plan.compatibility_confirmation;
     let result = service
         .configure_instance(Some(&view.instance.id), request, &context())
         .await
@@ -1638,4 +1677,55 @@ async fn compatibility_warning_allows_enabling_and_persists_after_success() {
     assert!(view.instance.enabled);
     assert!(view.compatibility_warning.is_some());
     assert!(view.load_error.is_none());
+}
+
+#[tokio::test]
+async fn incompatible_start_rejects_stale_confirmations_and_unloadable_packages() {
+    for mismatch in ["host", "instance", "revision", "artifact", "unloadable"] {
+        let fixture = LifecycleFixture::new(MigrationBehavior::Succeed);
+        {
+            let mut data = fixture.data.lock().unwrap();
+            data.snapshot.instances[0].enabled = false;
+            data.compatibility_warning = Some("middleware v2 未声明兼容".into());
+            if mismatch == "unloadable" {
+                data.inspection_error = Some(AdminErrorKind::Invalid);
+            }
+        }
+        let service = service(fixture.clone(), Arc::new(Published::default()));
+        let previous = fixture.data.lock().unwrap().snapshot.instances[0].clone();
+        let mut confirmation =
+            gateway_admin::model::plugins::instances::PluginCompatibilityConfirmation {
+                host_fingerprint: "test-host".into(),
+                instance_id: previous.id.clone(),
+                instance_revision: previous.revision.get(),
+                artifact_sha256: OLD_ARTIFACT.into(),
+            };
+        match mismatch {
+            "host" => confirmation.host_fingerprint = "another-host".into(),
+            "instance" => confirmation.instance_id = "another-instance".into(),
+            "revision" => confirmation.instance_revision += 1,
+            "artifact" => confirmation.artifact_sha256 = NEW_ARTIFACT.into(),
+            _ => {}
+        }
+        let mut request = input();
+        request.artifact_sha256 = OLD_ARTIFACT.into();
+        request.compatibility_confirmation = Some(confirmation);
+        let error = service
+            .configure_instance(Some(&previous.id), request, &context())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.kind(),
+            if mismatch == "unloadable" {
+                AdminErrorKind::Invalid
+            } else {
+                AdminErrorKind::Conflict
+            }
+        );
+        let data = fixture.data.lock().unwrap();
+        assert!(data.saves.is_empty(), "{mismatch}");
+        assert!(data.prepared_snapshots.is_empty(), "{mismatch}");
+        assert!(!data.snapshot.instances[0].enabled);
+    }
 }

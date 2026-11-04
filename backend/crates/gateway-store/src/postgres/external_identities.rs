@@ -162,6 +162,7 @@ async fn provision_in_transaction(
     }
     let client_key_id = key.id.clone();
     let new_key = NewClientApiKey {
+        peer_sharing: key.peer_sharing,
         request_profile_overrides: key.request_profile_overrides,
         id: key.id.as_str().to_owned(),
         name: key.name,

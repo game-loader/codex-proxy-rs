@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ZButton, ZInput, ZPageHeader, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
+import { ZButton, ZInput, ZPageHeader, ZScrollbar, ZSegmented } from '@codex-proxy/ui'
 import { Check, Eye, Pencil, RotateCcw, Save, Search, Undo2 } from '@lucide/vue'
 
-import { computed, defineAsyncComponent, shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
 
 import { useI18n } from 'vue-i18n'
 
@@ -10,14 +10,8 @@ import { notification as ZNotification } from '@/utils/notification'
 
 import { useThemeEditor } from '../composables/useThemeEditor'
 import ThemeComponentTokenPanel from './ThemeComponentTokenPanel.vue'
+import ThemeEditorPreview from './ThemeEditorPreview.vue'
 import ThemeGlobalTokenPanel from './ThemeGlobalTokenPanel.vue'
-
-const ThemeEditorPreview = defineAsyncComponent({
-  loader: () => import('./ThemeEditorPreview.vue'),
-  loadingComponent: ZSkeleton,
-  delay: 200,
-  timeout: 30000,
-})
 
 const { t } = useI18n({ useScope: 'global' })
 const mobilePreviewOpen = shallowRef(false)
@@ -87,8 +81,8 @@ function saveTheme(event: MouseEvent) {
         <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>{{ t('appearance.settings.description') }}</span>
           <span
-            class="inline-flex items-center gap-1.5 text-cp-sm font-heavy"
-            :class="dirty ? 'text-cp-primary-text' : 'text-cp-text-tertiary'"
+            class="inline-flex items-center gap-1.5 text-z-sm font-heavy"
+            :class="dirty ? 'text-z-primary-text' : 'text-z-text-tertiary'"
           >
             <span class="size-1.5 rounded-full bg-current" />
             {{ dirty ? t('appearance.settings.pendingChanges', { count: modificationCount }) : t('appearance.settings.synced') }}
@@ -136,14 +130,14 @@ function saveTheme(event: MouseEvent) {
     </ZPageHeader>
 
     <section
-      class="theme-workbench isolate mt-5 overflow-hidden rounded-cp-card bg-cp-bg-layout shadow-cp-card xl:flex xl:min-h-0 xl:flex-1 xl:flex-col"
+      class="theme-workbench isolate mt-5 overflow-hidden rounded-z-card bg-z-bg-layout shadow-z-card xl:flex xl:min-h-0 xl:flex-1 xl:flex-col"
       :aria-label="t('appearance.settings.themeEditor')"
     >
       <div
         class="theme-workbench-body grid min-h-180 gap-3 xl:min-h-0 xl:flex-1 xl:overflow-hidden xl:grid-cols-[370px_minmax(0,1fr)]"
       >
         <aside
-          class="h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-cp-lg bg-cp-bg-container pt-3 pr-0 pb-3 pl-3 shadow-cp-secondary min-[768px]:grid"
+          class="h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-z-lg bg-z-bg-container pt-3 pr-0 pb-3 pl-3 shadow-z-secondary min-[768px]:grid"
           :class="mobilePreviewOpen ? 'hidden' : 'grid'"
           :aria-label="t('appearance.settings.themeTokenEditingPanel')"
         >

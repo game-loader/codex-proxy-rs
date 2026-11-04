@@ -266,6 +266,7 @@ pub struct AccountSummaryView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountView {
+    pub upstream: Option<super::AccountUpstreamInfoView>,
     pub capabilities: AccountCapabilitiesView,
     pub outbound_proxy_id: Option<String>,
     pub outbound_proxy_endpoint: Option<String>,
@@ -394,6 +395,7 @@ pub struct AccountQuotaView {
     pub rate_limit_recovery_display: Option<String>,
     pub rate_limit_reason: Option<String>,
     pub recovery_probe_required: bool,
+    pub protection_rules: Vec<gateway_core::account::AccountProtectionMatch>,
     pub windows: Vec<AccountQuotaWindowView>,
     pub credits: Option<AccountQuotaCreditsView>,
 }
@@ -411,6 +413,11 @@ pub struct AccountQuotaCreditsView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuotaWindowView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_account_id: Option<String>,
+    pub amount: Option<super::AccountQuotaAmountView>,
+    pub observed_at_display: Option<String>,
+    pub stale: bool,
     pub key: String,
     pub group: String,
     pub limit_id: Option<String>,
@@ -432,6 +439,7 @@ pub struct AccountQuotaWindowView {
 #[serde(rename_all = "snake_case")]
 pub enum AccountUsageWindowKind {
     General,
+    Daily,
     Weekly,
     Monthly,
     Quota,
@@ -721,8 +729,11 @@ pub struct AccountModelView {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountModelsData {
     pub models: Vec<AccountModelView>,
+    pub observed_at: Option<String>,
+    pub observed_at_display: String,
 }
 
 /// 账号模型目录文件；`catalog` 直接作为 Codex `model_catalog_json` 的文件正文落盘

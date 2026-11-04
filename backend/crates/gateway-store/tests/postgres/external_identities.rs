@@ -24,6 +24,7 @@ fn identity(subject: &str) -> ExternalIdentity {
 
 fn key(index: usize) -> NewClientKey {
     NewClientKey {
+        peer_sharing: Default::default(),
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new(format!("key_feishu_{index}")).unwrap(),
         name: format!("feishu-member-{index}"),

@@ -5,10 +5,10 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { t } from '@/i18n'
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, generateRequestId } from '@/utils/operation'
-import { formatProviderLabel, isSupportedProvider } from '@/utils/providers'
-import { accountCreateProvider, accountCreateSourceKey, accountImportModes, accountImportSettings, accountProxyError, emptyAccountCreateForm } from '../utils/accountCreate'
+import { isSupportedProvider } from '@/utils/providers'
+import { accountCreateProvider, accountCreateSourceKey, accountImportModes, accountImportSettings, emptyAccountCreateForm } from '../utils/accountCreate'
 import { accountImportBatches, accountImportDocuments, mixedImportDocuments } from '../utils/accountImport'
-import { apiKeyAccountError, emptyApiKeyAccountForm } from '../utils/upstreamApiKey'
+import { emptyApiKeyAccountForm } from '../utils/upstreamApiKey'
 import { useAccountAuthorization } from './useAccountAuthorization'
 
 export function useAccountOnboarding(options: {
@@ -58,9 +58,6 @@ export function useAccountOnboarding(options: {
     let submitted = 0
     await creatingAccountAction.run(async () => {
       const form = createForm.value
-      const proxyError = accountProxyError(form)
-      if (proxyError)
-        throw new Error(proxyError)
       const settings = accountImportSettings(form)
       const outboundProxyId = form.proxyMode === 'proxy'
         ? form.proxyId.trim()
@@ -73,16 +70,13 @@ export function useAccountOnboarding(options: {
         const importProvider = requireImportProvider(provider)
         if (importProvider !== 'openai' && importProvider !== 'newapi')
           throw new Error(t('accounts.onboarding.apiKeyUnsupported'))
-        const error = apiKeyAccountError(form.apiKey)
-        if (error)
-          throw new Error(error)
         if (importProvider === 'newapi') {
           await importAccounts({
             provider: importProvider,
             settings,
             outboundProxyId,
             data: {
-              name: form.apiKey.name.trim(),
+              name: form.name.trim(),
               base_url: form.apiKey.base_url.trim(),
               api_key: form.apiKey.apiKey,
             },
@@ -97,7 +91,7 @@ export function useAccountOnboarding(options: {
           data: {
             provider: 'openai',
             authentication_kind: 'api_key',
-            name: form.apiKey.name.trim(),
+            name: form.name.trim(),
             base_url: form.apiKey.base_url.trim(),
             api_key: form.apiKey.apiKey,
             transport: form.apiKey.transport,
@@ -114,7 +108,9 @@ export function useAccountOnboarding(options: {
       const batches = accountImportBatches(documents.map(entry => ({
         provider: entry.provider,
         data: entry.document,
-        settings,
+        settings: documents.length === 1
+          ? settings
+          : { ...settings, name: undefined },
         outboundProxyId,
       })))
       // 同一输入重试时复用每批标识，恢复丢失响应或部分提交，不重复执行 RT 交换
@@ -152,15 +148,10 @@ export function useAccountOnboarding(options: {
       if (!isSupportedProvider(provider))
         throw new Error(t('accounts.onboarding.accountPlatformIsNotSupported'))
       const account = reauthorizingAccount.value
-      const proxyError = accountProxyError(form)
-      if (proxyError)
-        throw new Error(proxyError)
       await authorization.start({
         start: {
           provider,
-          name: account?.name || account?.email || t('accounts.onboarding.accountName', {
-            provider: formatProviderLabel(provider),
-          }),
+          name: account?.name ?? form.name.trim(),
           accountId: account?.id,
           outboundProxyId: account
             ? undefined
@@ -236,7 +227,6 @@ export function useAccountOnboarding(options: {
     showCreateModal,
     reauthorizingAccount,
     creatingAccount: creatingAccountAction.loading,
-    authorizingOAuth: authorization.busy,
     authorization: authorization.view,
     authorizationCallback: authorization.callback,
     createForm,

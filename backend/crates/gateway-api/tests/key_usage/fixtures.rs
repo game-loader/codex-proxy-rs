@@ -18,6 +18,7 @@ pub(super) async fn fixture() -> AdminTestFixture {
     let fixture = key_fixture().await;
     let now = Utc::now();
     *fixture.client_key.lock().unwrap() = Some(ClientKeyRecord {
+        peer_sharing: Default::default(),
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new("key-42").unwrap(),
         name: "Development".to_owned(),
@@ -91,8 +92,14 @@ pub(super) async fn fixture() -> AdminTestFixture {
 
 fn usage_record() -> UsageListRecord {
     UsageListRecord {
+        provider_account_upstream_peer: None,
         error_code: None,
         error_message: None,
+        error_kind: None,
+        websocket_close_code: None,
+        continuation_unavailable_reason: None,
+        upstream_connection_exit_reason: None,
+        recovered: false,
         client_status_code: None,
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
         client_api_key_name: Some("Production".to_owned()),

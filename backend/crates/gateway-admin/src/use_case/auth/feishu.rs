@@ -106,6 +106,8 @@ impl FeishuSignIn {
         let id = ClientApiKeyId::new(format!("key_{}", Uuid::now_v7().simple()))
             .map_err(|_| LoginError::Unavailable)?;
         let key = NewClientKey {
+            // 自动开通的 Key 不对互联节点公开观测，需要时由管理员单独授权
+            peer_sharing: Default::default(),
             request_profile_overrides: Default::default(),
             name: key_name(identity, &id),
             label: Some(format!(

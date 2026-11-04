@@ -44,7 +44,6 @@ use serde_json::{Map, Number, Value};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::XaiWireProfileState;
 use crate::credential::{
     FailureClass, GrokAccountProfile, GrokCredentialAdmin, GrokCredentialCatalogError,
     GrokCredentialCatalogService, GrokCredentialQuotaService, GrokCredentialRefreshError,
@@ -53,10 +52,11 @@ use crate::credential::{
     GrokOAuthImportMetadata, GrokOAuthImportTokens, GrokOAuthSecret, GrokQuotaError,
     GrokQuotaPeriodKind, GrokQuotaSnapshot, OAuthError, PendingAuthorization,
     PreparedGrokCredentialRotation, PreparedGrokCredentialRotationGuard, RedirectUriAllowlist,
-    RotateManagedGrokCredential, SecretValue, VerifiedGrokAccount, VerifiedTokenSet,
+    RotateManagedGrokCredential, VerifiedGrokAccount, VerifiedTokenSet,
 };
 use crate::transport::profile::{GrokCliReleaseSnapshot, GrokCliReleaseStatus};
 use crate::transport::{GROK_CLI_BASE_URL, XAI_PROVIDER_NAME, grok_billing_breakdown_with_tier};
+use crate::{SecretValue, XaiWireProfileState};
 
 const PENDING_SCHEMA_VERSION: u64 = 3;
 const PENDING_TTL: TimeDelta = TimeDelta::minutes(30);
@@ -321,6 +321,16 @@ impl XaiAdminProvider {
 
 #[async_trait]
 impl ProviderAdmin for XaiAdminProvider {
+    fn peer_model_eligible(&self, account: &AccountRecord, _model: &str) -> Option<bool> {
+        Some(crate::credential::is_direct_account_kind(
+            &account.authentication_kind,
+        ))
+    }
+
+    fn is_direct_account(&self, authentication_kind: &str) -> bool {
+        crate::credential::is_direct_account_kind(authentication_kind)
+    }
+
     fn account_capabilities(
         &self,
         _account_id: &ProviderAccountId,
@@ -1182,19 +1192,9 @@ fn project_quota(
     refresh_token_expires_at: Option<DateTime<Utc>>,
     rolling_usage: Option<gateway_admin::model::accounts::AccountUsage>,
 ) -> ProviderQuota {
-    let Some(snapshot) = snapshot else {
-        return ProviderQuota {
-            credits: None,
-            plan_type: None,
-            observed_at: None,
-            refresh_token_expires_at,
-            windows: Vec::new(),
-            limit_reached: quota_exhausted,
-            provider_data: None,
-        };
-    };
-    let billing = snapshot.billing();
-    let window = if billing.has_authoritative_quota() {
+    let billing = snapshot.as_ref().map(GrokQuotaSnapshot::billing);
+    let window = if let Some(billing) = billing.filter(|billing| billing.has_authoritative_quota())
+    {
         let period_kind = billing.period_kind();
         let window_seconds = quota_window_seconds(billing.period_start(), billing.period_end());
         let mut data = Map::new();
@@ -1221,6 +1221,7 @@ fn project_quota(
             );
         }
         ProviderQuotaWindow {
+            upstream: None,
             key: billing.period_type().unwrap_or("billing").to_owned(),
             group: quota_group(period_kind).to_owned(),
             label: xai_quota_window_label(period_kind, window_seconds),
@@ -1238,7 +1239,9 @@ fn project_quota(
             provider_data: Some(ProviderDocument::new(OpaqueProviderData::new(data))),
         }
     } else {
+        // 本地滚动统计独立于上游额度观察，导入后尚无快照时也保留请求图与日用量
         ProviderQuotaWindow {
+            upstream: None,
             key: "free-rolling-24h".to_owned(),
             group: "shortTerm".to_owned(),
             label: "日限额".to_owned(),
@@ -1255,9 +1258,12 @@ fn project_quota(
         }
     };
     ProviderQuota {
+        upstream: None,
         credits: None,
-        plan_type: billing.plan_type().map(str::to_owned),
-        observed_at: Some(snapshot.observed_at()),
+        plan_type: billing
+            .and_then(|billing| billing.plan_type())
+            .map(str::to_owned),
+        observed_at: snapshot.as_ref().map(GrokQuotaSnapshot::observed_at),
         refresh_token_expires_at,
         windows: vec![window],
         limit_reached: quota_exhausted,

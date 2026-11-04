@@ -15,6 +15,7 @@ fn now() -> DateTime<Utc> {
 
 fn window(key: &str, days: u64) -> ProviderQuotaWindow {
     ProviderQuotaWindow {
+        upstream: None,
         key: key.to_owned(),
         group: if days > 7 { "monthly" } else { "shortTerm" }.to_owned(),
         label: key.to_owned(),
@@ -58,6 +59,7 @@ fn window(key: &str, days: u64) -> ProviderQuotaWindow {
 
 fn quota(windows: Vec<ProviderQuotaWindow>) -> ProviderQuota {
     ProviderQuota {
+        upstream: None,
         credits: None,
         plan_type: None,
         observed_at: Some(now()),
@@ -160,7 +162,10 @@ fn source_selection_keeps_provider_order_with_the_maximum_window_count() {
 fn short_or_model_specific_windows_are_not_account_capacity() {
     let mut model = window("model", 7);
     model.local_usage_attribution = QuotaLocalUsageAttribution::Unavailable;
-    for item in forecast(&quota(vec![window("day", 1), model])) {
+    let mut rolling = window("rolling-day", 1);
+    rolling.reset_at = None;
+    rolling.used_percent = None;
+    for item in forecast(&quota(vec![window("day", 1), rolling, model])) {
         assert!(item.source.is_none());
         assert!(item.unavailable_reason.is_some());
         assert!(item.estimated_tokens.is_none());

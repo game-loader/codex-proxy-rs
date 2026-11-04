@@ -23,7 +23,9 @@ use crate::openai::responses::validation::{ResponseValidationFacts, ResponsesDel
 
 use super::{
     super::{DecodedResponsesRequest, OpenAiResponsesEncoder, ProtocolErrorBody},
-    connection::{ConnectionEvent, FramePhase, ResponsesWebSocketConnection, WriteContext},
+    connection::{
+        ConnectionEvent, FramePhase, ResponsesWebSocketConnection, WriteContext, WriteOutcome,
+    },
     protocol::{
         error_event, initial_engine_error_event, is_response_create, response_metadata_event,
     },
@@ -32,6 +34,7 @@ use super::{
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ForwardOutcome {
     Continue,
+    ReconnectIfIdle,
     Disconnect,
 }
 
@@ -55,9 +58,25 @@ impl ConnectionReplaySnapshot {
         }
     }
 
-    fn commit(&mut self, response_id: String, provider_state: Option<ProviderSessionState>) {
-        self.last_response_id = Some(response_id);
-        self.provider_state = provider_state;
+    fn commit(&mut self, capture: &ReplayCaptureHandle, delivered: Option<&str>) -> ForwardOutcome {
+        let mut capture = capture
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(id) = capture.response_id.take() else {
+            return ForwardOutcome::Continue;
+        };
+        self.provider_state = capture.provider_state.take();
+        let reconnect = delivered == Some(&id)
+            && self
+                .provider_state
+                .as_ref()
+                .is_some_and(ProviderSessionState::prefers_websocket_reconnect);
+        self.last_response_id = Some(id);
+        if reconnect {
+            ForwardOutcome::ReconnectIfIdle
+        } else {
+            ForwardOutcome::Continue
+        }
     }
 }
 
@@ -199,7 +218,7 @@ pub(super) async fn forward_response(
 
     let mut first_frame_written = false;
     let mut current = Some(first);
-    let mut terminal_seen = false;
+    let mut terminal_write = None;
     let mut first_protocol_validated = true;
     loop {
         let frame = match current.take() {
@@ -211,12 +230,14 @@ pub(super) async fn forward_response(
                     response_control,
                     &mut interrupt,
                     &request_id,
-                    terminal_seen,
+                    terminal_write.is_some(),
                 )
                 .await
                 {
                     BodyInput::Frame(Ok(Some(frame))) => frame,
-                    BodyInput::Frame(Ok(None)) if terminal_seen && body.is_finalized() => {
+                    BodyInput::Frame(Ok(None))
+                        if terminal_write.is_some() && body.is_finalized() =>
+                    {
                         if delivery_validator.finish_websocket_delivery().is_err() {
                             return fail_body(
                                 connection,
@@ -226,16 +247,12 @@ pub(super) async fn forward_response(
                             )
                             .await;
                         }
-                        {
-                            let captured = capture
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            if let Some(response_id) = captured.response_id.clone() {
-                                replay.commit(response_id, captured.provider_state.clone());
-                            }
-                        }
+                        let delivered = delivery_validator
+                            .completed_response_id()
+                            .filter(|_| terminal_write == Some(WriteOutcome::Written));
+                        let outcome = replay.commit(&capture, delivered);
                         body.close().await;
-                        return ForwardOutcome::Continue;
+                        return outcome;
                     }
                     BodyInput::Frame(Ok(None)) => {
                         return fail_body(
@@ -256,7 +273,7 @@ pub(super) async fn forward_response(
                 }
             }
         };
-        if terminal_seen || validate_frame(&frame).is_err() {
+        if terminal_write.is_some() || validate_frame(&frame).is_err() {
             return fail_body(connection, body, MiddlewareError::InvalidState, &request_id).await;
         }
         if first_protocol_validated {
@@ -278,30 +295,27 @@ pub(super) async fn forward_response(
             (true, false) => FramePhase::Data,
         };
         let created_id = super::interrupt::ResponseInterrupt::created_id(&message);
-        match connection
+        let Ok(write) = connection
             .send_text(message, WriteContext::request(&request_id, phase))
             .await
-        {
-            Ok(super::connection::WriteOutcome::Written) => {
-                first_frame_written = true;
-                if let Some(id) = created_id {
-                    interrupt.observe_created(id, response_control);
-                    tokio::select! {
-                        _ = connection.wait_for_exit() => {
-                            detach_body(body);
-                            return ForwardOutcome::Disconnect;
-                        }
-                        () = interrupt.forward_pending(response_control) => {}
+        else {
+            detach_body(body);
+            return ForwardOutcome::Disconnect;
+        };
+        if write == WriteOutcome::Written {
+            first_frame_written = true;
+            if let Some(id) = created_id {
+                interrupt.observe_created(id, response_control);
+                tokio::select! {
+                    _ = connection.wait_for_exit() => {
+                        detach_body(body);
+                        return ForwardOutcome::Disconnect;
                     }
+                    () = interrupt.forward_pending(response_control) => {}
                 }
             }
-            Ok(super::connection::WriteOutcome::Suppressed) => {}
-            Err(_) => {
-                detach_body(body);
-                return ForwardOutcome::Disconnect;
-            }
         }
-        terminal_seen = terminal;
+        terminal_write = terminal.then_some(write);
     }
 }
 
@@ -400,13 +414,13 @@ fn middleware_gateway_error(error: MiddlewareError) -> GatewayError {
         MiddlewareError::Rejected | MiddlewareError::Remote { rejected: true, .. } => {
             GatewayError::new(
                 GatewayErrorKind::PolicyDenied,
-                "request middleware rejected the request",
+                "Request middleware rejected the request.",
             )
         }
         MiddlewareError::Fault | MiddlewareError::Remote { .. } | MiddlewareError::InvalidState => {
             GatewayError::new(
                 GatewayErrorKind::Internal,
-                "request middleware returned an invalid response",
+                "Request middleware returned an invalid response.",
             )
         }
     }
@@ -770,6 +784,21 @@ pub(super) async fn send_control(
     payload: &str,
     request_id: &Arc<str>,
 ) -> ForwardOutcome {
+    // HTTP 桥接没有原连接可中断；普通 error 会使 Codex 丢弃仍可正常完成的响应流
+    // 仅在发送前确认无绑定时拒绝中断，不把发送结果不明的失败伪装成明确拒绝
+    if control.binding().is_none()
+        && let Some(message) = super::interrupt::ResponseInterrupt::unavailable_event(payload)
+    {
+        return if connection
+            .send_text(message, WriteContext::request(request_id, FramePhase::Data))
+            .await
+            .is_ok()
+        {
+            ForwardOutcome::Continue
+        } else {
+            ForwardOutcome::Disconnect
+        };
+    }
     let result = tokio::select! {
         _ = connection.wait_for_exit() => return ForwardOutcome::Disconnect,
         result = control.send(payload) => result,
@@ -779,7 +808,7 @@ pub(super) async fn send_control(
             connection,
             &GatewayError::new(
                 GatewayErrorKind::InvalidRequest,
-                "No upstream WebSocket connection is available for control messages",
+                "No upstream WebSocket connection is available for control messages.",
             ),
             request_id,
         )

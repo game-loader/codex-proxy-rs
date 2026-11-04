@@ -4,8 +4,9 @@ use super::{
     frame::*,
     pump::run_pump,
     state::{ConnectionCommand, ConnectionStats},
+    transport::Socket,
 };
-use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, close_code};
+use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, close_code};
 use futures::{Sink, Stream};
 use gateway_core::{
     engine::middleware::{FrozenMiddlewarePlan, MiddlewareHeader},
@@ -21,7 +22,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, watch},
     task::JoinHandle,
     time::{Instant, timeout},
 };
@@ -30,26 +31,30 @@ use tokio::{
 pub struct ResponsesWebSocketConnection {
     connection_id: Arc<str>,
     opened_at: Instant,
+    cancellation: CancellationToken,
     expired: Arc<AtomicBool>,
     commands: Option<mpsc::Sender<ConnectionCommand>>,
     incoming: mpsc::Receiver<PendingConnectionEvent>,
     deferred: VecDeque<PendingConnectionEvent>,
+    input_gate: Arc<tokio::sync::Mutex<()>>,
     exited: oneshot::Receiver<PumpExitReason>,
     pump_task: Option<JoinHandle<()>>,
     stats: Arc<ConnectionStats>,
+    activity: watch::Sender<Instant>,
     config: ConnectionConfig,
     exit_reason: Option<PumpExitReason>,
 }
 
 impl ResponsesWebSocketConnection {
     pub(in super::super) fn new(
-        socket: WebSocket,
+        socket: Socket,
         connection_id: String,
         cancellation: CancellationToken,
         middleware: Option<FrozenMiddlewarePlan>,
         headers: Arc<[MiddlewareHeader]>,
     ) -> Self {
         spawn_connection(
+            socket.activity.clone(),
             socket,
             Arc::<str>::from(connection_id),
             cancellation,
@@ -168,6 +173,26 @@ impl ResponsesWebSocketConnection {
         .await;
     }
 
+    pub(in super::super) async fn close_for_replay_if_idle(&mut self) -> bool {
+        // 原子划分入站帧与正常关闭，正在处理或已排队的帧都先按原合同执行
+        let Ok(_guard) = self.input_gate.clone().try_lock_owned() else {
+            return false;
+        };
+        if !self.deferred.is_empty() || !self.incoming.is_empty() {
+            return false;
+        }
+        self.close(
+            CloseFrame {
+                code: close_code::NORMAL,
+                reason: "Reconnect with full input.".into(),
+            },
+            WriteContext::connection(FramePhase::Close),
+            PumpExitReason::ServerClose,
+        )
+        .await;
+        true
+    }
+
     pub(in super::super) async fn close_for_connection_limit(&mut self, reason: &'static str) {
         self.close(
             CloseFrame {
@@ -266,7 +291,9 @@ impl ResponsesWebSocketConnection {
     }
 
     fn terminate(&mut self, reason: PumpExitReason) {
+        let reason = self.exited.try_recv().unwrap_or(reason);
         self.exit_reason.get_or_insert(reason);
+        self.cancellation.cancel();
         self.commands.take();
         if let Some(task) = self.pump_task.take() {
             task.abort();
@@ -275,8 +302,7 @@ impl ResponsesWebSocketConnection {
 
     pub(in super::super) fn log_summary(&self, request_count: u64) {
         let connection_age_ms = self.age().as_millis();
-        let read_idle_ms = connection_age_ms
-            .saturating_sub(u128::from(self.stats.last_read_ms.load(Ordering::Relaxed)));
+        let read_idle_ms = self.activity.borrow().elapsed().as_millis();
         let write_idle_ms = connection_age_ms
             .saturating_sub(u128::from(self.stats.last_write_ms.load(Ordering::Relaxed)));
         tracing::info!(
@@ -306,6 +332,7 @@ impl ResponsesWebSocketConnection {
 
 impl Drop for ResponsesWebSocketConnection {
     fn drop(&mut self) {
+        self.cancellation.cancel();
         self.commands.take();
         if let Some(task) = self.pump_task.take() {
             task.abort();
@@ -314,7 +341,10 @@ impl Drop for ResponsesWebSocketConnection {
 }
 
 /// 为 WebSocket transport 启动包含冻结中间件计划的单 owner pump
+/// cancellation 必须属于本连接，连接退出或句柄释放时会取消它
+/// activity 仅由 transport 的实际入站字节或 pump 的完整消息更新，不能由写入刷新
 pub fn spawn_connection<S, E>(
+    activity: watch::Sender<Instant>,
     socket: S,
     connection_id: Arc<str>,
     cancellation: CancellationToken,
@@ -335,13 +365,16 @@ where
     let extensions = crate::middleware::current()
         .map(|context| context.extensions)
         .unwrap_or_default();
+    let input_gate = Arc::new(tokio::sync::Mutex::new(()));
     let pump_task = tokio::spawn(run_pump(
         socket,
+        activity.clone(),
         command_rx,
         incoming_tx,
+        Arc::clone(&input_gate),
         exit_tx,
         Arc::clone(&connection_id),
-        cancellation,
+        cancellation.clone(),
         opened_at,
         Arc::clone(&expired),
         Arc::clone(&stats),
@@ -353,13 +386,16 @@ where
     ResponsesWebSocketConnection {
         connection_id,
         opened_at,
+        cancellation,
         expired,
         commands: Some(command_tx),
         incoming: incoming_rx,
         deferred: VecDeque::new(),
+        input_gate,
         exited: exit_rx,
         pump_task: Some(pump_task),
         stats,
+        activity,
         config,
         exit_reason: None,
     }
