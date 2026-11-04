@@ -6,6 +6,7 @@ import { ZIconButton, ZMotionIcon, ZPopover, ZScrollbar } from '@codex-proxy/ui'
 import {
   ArrowUpCircle,
   Blocks,
+  BookOpen,
   BringToFront,
   ChartNoAxesColumn,
   ChevronDown,
@@ -103,6 +104,11 @@ const navItems = computed(() => ([
     label: t('navigation.usage'),
     icon: ChartNoAxesColumn,
     path: '/usage',
+  },
+  {
+    label: t('navigation.guide'),
+    icon: BookOpen,
+    path: '/guide',
   },
   {
     label: t('navigation.plugins'),

@@ -23,6 +23,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/key-usage/index.vue'),
   },
   {
+    path: '/key-usage/guide',
+    name: 'key-usage-guide',
+    meta: { role: 'key' },
+    component: () => import('@/views/key-guide/index.vue'),
+  },
+  {
     path: '/',
     meta: { role: 'admin', defaultEntry: true },
     component: () => import('@/layout/index.vue'),
@@ -56,6 +62,11 @@ export const routes: RouteRecordRaw[] = [
         path: 'usage',
         name: 'usage',
         component: () => import('@/views/usage/index.vue'),
+      },
+      {
+        path: 'guide',
+        name: 'guide',
+        component: () => import('@/views/guide/index.vue'),
       },
       {
         path: 'plugins',

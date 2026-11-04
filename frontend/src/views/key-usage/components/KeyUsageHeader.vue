@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ZButton, ZIconButton, ZPageHeader, ZSelect } from '@codex-proxy/ui'
 
-import { KeyRound, LogOut, Moon, RefreshCw, Sun, Terminal } from '@lucide/vue'
+import { BookOpen, KeyRound, LogOut, Moon, RefreshCw, Sun, Terminal } from '@lucide/vue'
 import { shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -54,6 +54,10 @@ async function logout() {
     <template #actions>
       <div class="key-usage-actions flex max-w-[calc(100vw-32px)] flex-wrap items-center justify-end gap-2">
         <AppLanguageMenu size="default" variant="solid" />
+        <ZButton @click="router.push({ name: 'key-usage-guide' })">
+          <BookOpen class="size-4" />
+          {{ t('navigation.guide') }}
+        </ZButton>
         <ZButton :loading="configuring" @click="$emit('configure')">
           <Terminal class="size-4" />
           {{ t('keys.actions.configure') }}

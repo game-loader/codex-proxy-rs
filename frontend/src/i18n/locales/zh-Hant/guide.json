@@ -1,0 +1,70 @@
+{
+  "guide": {
+    "description": "把 Codex 接入當前網關並查看用量",
+    "backToUsage": "返回用量",
+    "flow": {
+      "title": "請求鏈路",
+      "description": "Codex 只連接網關，網關按 Key 權限選擇上游賬號",
+      "caption": "代理密鑰只用於訪問網關，上游賬號憑據由網關保管，不會下發到客戶端",
+      "client": "Codex 客戶端",
+      "clientDetail": "CLI、Desktop 或 IDE 插件",
+      "gateway": "CPR 網關",
+      "keyAuth": "Key 鑑權",
+      "routing": "賬號調度",
+      "metering": "用量與額度",
+      "upstream": "上游賬號",
+      "upstreamOAuth": "Codex OAuth 賬號",
+      "upstreamApiKey": "API Key 賬號",
+      "request": "攜帶代理密鑰",
+      "response": "流式返回結果",
+      "credential": "使用賬號憑據"
+    },
+    "steps": {
+      "title": "接入步驟",
+      "description": "首次接入按順序完成，已有配置先備份",
+      "getConfig": "獲取配置",
+      "getConfigDetail": "打開配置窗口，按操作系統複製 config.toml",
+      "write": "寫入配置",
+      "writeDetail": "合併到用戶配置目錄，不要重複添加已有的表",
+      "restart": "重啓 Codex",
+      "restartDetail": "完全退出後重新打開，新會話讀取新配置",
+      "verify": "確認用量",
+      "verifyDetail": "發送一次對話，回到用量頁查看新記錄",
+      "writeModes": "寫入方式",
+      "manual": "手動合併 config.toml",
+      "manualDetail": "包含遠端壓縮、原生生圖、WebSocket 和語音設置",
+      "ccSwitch": "CC Switch 一鍵導入",
+      "ccSwitchDetail": "寫入連接資訊和日／週額度查詢，不含上述高級設置",
+      "recommended": "推薦",
+      "openKeys": "前往 API 密鑰"
+    },
+    "config": {
+      "title": "配置文件",
+      "description": "Provider 設置寫入用戶配置，不要只寫到項目目錄",
+      "location": "配置位置",
+      "writeHere": "寫入這裡",
+      "authKept": "可保留",
+      "snippet": "config.toml 關鍵字段",
+      "codexHome": "設置過 CODEX_HOME 時以該目錄為準",
+      "fields": {
+        "provider": "自定義 Provider ID，兩處大小寫保持一致",
+        "baseUrl": "網關地址，與模型目錄使用同一前綴",
+        "auth": "不依賴本地 ChatGPT 登錄",
+        "token": "代理密鑰以明文保存，不要提交到 Git",
+        "websocket": "打開前確認反向代理允許 Upgrade"
+      }
+    },
+    "troubleshooting": {
+      "title": "常見問題",
+      "loginTitle": "仍提示登錄",
+      "login": "確認實際讀取的配置目錄和選中的 Provider，再完全退出重啓",
+      "unauthorized": "檢查代理密鑰是否完整、是否已被停用",
+      "version": "客戶端低於管理員設置的最低版本，更新 Codex 後重試",
+      "imageTitle": "沒有生圖工具",
+      "image": "CC Switch 導入不含生圖設置，改用手動合併的完整配置",
+      "devProxy": "這是開發代理地址，日常使用改成後端或 HTTPS 地址",
+      "websocketTitle": "WebSocket 連接失敗",
+      "websocket": "確認反向代理允許 Upgrade，或把 supports_websockets 改回 false"
+    }
+  }
+}

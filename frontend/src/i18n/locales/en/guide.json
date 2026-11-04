@@ -1,0 +1,70 @@
+{
+  "guide": {
+    "description": "Connect Codex to this gateway and check your usage",
+    "backToUsage": "Back to usage",
+    "flow": {
+      "title": "Request flow",
+      "description": "Codex only talks to the gateway, which picks upstream accounts allowed for the key",
+      "caption": "The proxy key only unlocks the gateway, upstream credentials stay on the server and never reach the client",
+      "client": "Codex client",
+      "clientDetail": "CLI, Desktop or IDE extension",
+      "gateway": "CPR gateway",
+      "keyAuth": "Key auth",
+      "routing": "Account routing",
+      "metering": "Usage and budget",
+      "upstream": "Upstream accounts",
+      "upstreamOAuth": "Codex OAuth account",
+      "upstreamApiKey": "API key account",
+      "request": "Sends proxy key",
+      "response": "Streams the result back",
+      "credential": "Uses account credentials"
+    },
+    "steps": {
+      "title": "Setup steps",
+      "description": "Follow these in order for the first setup and back up any existing config",
+      "getConfig": "Get config",
+      "getConfigDetail": "Open the config dialog and copy config.toml for your OS",
+      "write": "Write config",
+      "writeDetail": "Merge it into your user config directory without duplicating existing tables",
+      "restart": "Restart Codex",
+      "restartDetail": "Quit completely and reopen, new sessions read the new config",
+      "verify": "Check usage",
+      "verifyDetail": "Send one message, then look for the new record on the usage page",
+      "writeModes": "Ways to write",
+      "manual": "Merge config.toml manually",
+      "manualDetail": "Includes remote compaction, native image generation, WebSocket and voice",
+      "ccSwitch": "Import with CC Switch",
+      "ccSwitchDetail": "Writes connection info and daily or weekly budget queries without the advanced settings above",
+      "recommended": "Recommended",
+      "openKeys": "Go to API keys"
+    },
+    "config": {
+      "title": "Config file",
+      "description": "Write Provider settings into the user config instead of only a project directory",
+      "location": "Location",
+      "writeHere": "Write here",
+      "authKept": "Can stay",
+      "snippet": "Key fields in config.toml",
+      "codexHome": "CODEX_HOME takes precedence when set",
+      "fields": {
+        "provider": "Custom Provider ID, keep the casing identical in both places",
+        "baseUrl": "Gateway URL, the model catalog uses the same prefix",
+        "auth": "No local ChatGPT login required",
+        "token": "The proxy key is stored in plain text, keep it out of Git",
+        "websocket": "Make sure the reverse proxy allows Upgrade before enabling"
+      }
+    },
+    "troubleshooting": {
+      "title": "Troubleshooting",
+      "loginTitle": "Still asks to sign in",
+      "login": "Check which config directory and Provider Codex actually uses, then quit and restart it",
+      "unauthorized": "Check that the proxy key is complete and still enabled",
+      "version": "The client is older than the minimum version set by the admin, update Codex and retry",
+      "imageTitle": "No image generation tool",
+      "image": "CC Switch imports skip image settings, use the full manually merged config",
+      "devProxy": "This is the dev proxy address, switch to the backend or HTTPS address for daily use",
+      "websocketTitle": "WebSocket fails to connect",
+      "websocket": "Make sure the reverse proxy allows Upgrade, or set supports_websockets back to false"
+    }
+  }
+}

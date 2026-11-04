@@ -4,6 +4,7 @@ import auth from './auth.json'
 import common from './common.json'
 import dashboard from './dashboard.json'
 import groups from './groups.json'
+import guide from './guide.json'
 import keys from './keys.json'
 import navigation from './navigation.json'
 import plugins from './plugins.json'
@@ -21,6 +22,7 @@ export default {
   ...common,
   ...dashboard,
   ...groups,
+  ...guide,
   ...keys,
   ...navigation,
   ...plugins,
