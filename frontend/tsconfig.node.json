@@ -14,5 +14,5 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["vite.config.ts", "build/**/*.ts"]
+  "include": ["vite.config.ts", "build/**/*.ts", "src/utils/codex-config.ts"]
 }

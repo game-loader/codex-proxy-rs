@@ -4,6 +4,7 @@ import VueI18n from '@intlify/unplugin-vue-i18n/vite'
 import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
+import { codexInstallScripts } from './build/codex-install/index.ts'
 import { pluginBridge } from './build/plugin-bridge.ts'
 
 export default defineConfig(({ mode }) => {
@@ -22,6 +23,7 @@ export default defineConfig(({ mode }) => {
         source: sourceUi ? uiRoot : undefined,
       }),
       pluginBridge(),
+      codexInstallScripts(),
     ],
     resolve: {
       alias: {

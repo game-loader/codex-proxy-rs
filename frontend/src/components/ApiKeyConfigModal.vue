@@ -5,7 +5,7 @@ import { Apple, Copy, Monitor, Upload } from '@lucide/vue'
 
 import { computed, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { buildCodexCcSwitchImportDeeplink, buildCodexConfig, CODEX_WEBSOCKET_ENABLED_BY_DEFAULT } from '@/utils/client'
+import { buildCodexCcSwitchImportDeeplink, buildCodexConfig, buildCodexInstallCommand, CODEX_WEBSOCKET_ENABLED_BY_DEFAULT } from '@/utils/client'
 import ClientImportModal from './ClientImportModal.vue'
 
 const props = defineProps<{
@@ -27,7 +27,7 @@ const { t } = useI18n({ useScope: 'global' })
 const open = defineModel<boolean>({ default: false })
 const showImport = shallowRef(false)
 
-const activePlatform = shallowRef('unix')
+const activePlatform = shallowRef<'unix' | 'windows'>('unix')
 const websocketEnabled = shallowRef(CODEX_WEBSOCKET_ENABLED_BY_DEFAULT)
 
 const platformOptions = [
@@ -44,6 +44,12 @@ const configPath = computed(() =>
 const codexConfig = computed(() => buildCodexConfig({
   apiKey: keyValue.value,
   baseUrl: props.apiBaseUrl,
+  websocketEnabled: websocketEnabled.value,
+}))
+const installCommand = computed(() => buildCodexInstallCommand({
+  apiKey: keyValue.value,
+  baseUrl: props.apiBaseUrl,
+  platform: activePlatform.value,
   websocketEnabled: websocketEnabled.value,
 }))
 
@@ -78,6 +84,29 @@ function importToClient() {
           :width="56"
         />
       </div>
+
+      <section v-if="keyValue" class="overflow-hidden rounded-z-card bg-z-fill-quaternary shadow-z-tertiary">
+        <div class="flex items-center justify-between gap-3 px-4 py-2.5">
+          <span class="flex min-w-0 flex-col">
+            <span class="truncate text-z-sm font-emphasis text-z-text-secondary">{{ t('keys.configuration.installCommand') }}</span>
+            <span class="text-z-xs text-z-text-tertiary">{{ t('keys.configuration.installCommandDetail') }}</span>
+          </span>
+          <ZIconButton
+            variant="solid"
+            size="small"
+            :aria-label="t('keys.configuration.copyInstallCommand')"
+            @click="emit('copy', installCommand)"
+          >
+            <Copy class="size-3.5" />
+          </ZIconButton>
+        </div>
+        <div class="mx-3 mb-3 rounded-z bg-z-bg-container px-3.5 py-3 shadow-z-tertiary">
+          <pre
+            class="m-0 whitespace-pre-wrap break-all font-mono text-z-sm leading-[1.65] font-emphasis text-z-text"
+            v-text="installCommand"
+          />
+        </div>
+      </section>
 
       <section class="overflow-hidden rounded-z-card bg-z-fill-quaternary shadow-z-tertiary">
         <div class="flex items-center justify-between gap-3 px-4 py-2.5">

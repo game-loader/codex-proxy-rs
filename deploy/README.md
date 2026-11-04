@@ -534,6 +534,23 @@ SSE 注释保活用于防止传输链路空闲断开，不会重置 Codex 等待
 已有配置先备份，合并后完全退出并重启 Codex。代理密钥由 Provider 配置提供，
 不需要另写 `auth.json`，已有官方登录文件可以保留
 
+同一窗口的「一键配置」命令会运行网关域名下的 `/codex/install.sh` 或 `/codex/install.ps1`：
+
+- 读取官方最新版本，按当前安装来源升级 Codex：npm、bun、Homebrew 用对应包管理器，其余或未安装时运行官方安装器
+- 原 `config.toml` 备份为同目录的 `config.toml.bak.<时间>`，再整体写入下方模板，不做合并；
+  需要保留的其他设置从备份中手动合并回去
+- 脚本随前端构建生成，模板与管理端一致；命令行中带有明文密钥，不要在共享终端或录屏中运行
+
+```sh
+curl -fsSL https://<gateway>/codex/install.sh | sh -s -- --base-url 'https://<gateway>/v1' --key '<client-api-key>'
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://<gateway>/codex/install.ps1))) -BaseUrl 'https://<gateway>/v1' -ApiKey '<client-api-key>'
+```
+
+开启 WebSocket 时追加 `--websocket` 或 `-WebSocket`
+
 管理端生成的 CC Switch 一键导入包含连接信息和当前 Key 的日／周额度查询，默认每 30 分钟刷新。
 查询地址和凭据随导入生成，在 CC Switch 中修改 Provider 的地址或 Key 后，需重新导入以同步用量查询。
 导入不包含下方模板的远程压缩、原生生图、WebSocket 和语音设置。需要这些设置时，使用下方配置直连 CPR，

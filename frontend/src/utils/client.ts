@@ -1,49 +1,7 @@
 import { API_BASE_URL } from '@/api/constants'
+import { CODEX_DEFAULT_MODEL } from './codex-config'
 
-const CODEX_DEFAULT_MODEL = 'gpt-5.6-terra'
-export const CODEX_WEBSOCKET_ENABLED_BY_DEFAULT = false
-
-interface CodexConfigInput {
-  apiKey: string
-  baseUrl: string
-  websocketEnabled?: boolean
-}
-
-export function buildCodexConfig(input: CodexConfigInput): string {
-  const baseUrl = input.baseUrl.replace(/\/+$/, '')
-  const websocketEnabled = input.websocketEnabled ?? CODEX_WEBSOCKET_ENABLED_BY_DEFAULT
-  return `model_provider = "OpenAI"
-model = "${CODEX_DEFAULT_MODEL}"
-review_model = "${CODEX_DEFAULT_MODEL}"
-model_reasoning_effort = "max"
-service_tier = "default"
-# 语音通话控制地址
-experimental_realtime_ws_base_url = ${JSON.stringify(baseUrl)}
-
-[model_providers.OpenAI]
-name = "OpenAI"
-base_url = ${JSON.stringify(baseUrl)}
-model_catalog_url = ${JSON.stringify(`${baseUrl}/models`)}
-wire_api = "responses"
-supports_websockets = ${websocketEnabled}
-requires_openai_auth = false
-# 代理密钥
-experimental_bearer_token = ${JSON.stringify(input.apiKey)}
-
-[model_providers.OpenAI.capabilities]
-# V2 远程压缩
-remote_compaction = "v2"
-
-[model_providers.OpenAI.http_headers]
-# 服务端托管认证
-X-OpenAI-Actor-Authorization = "proxy-managed"
-
-[features]
-image_generation = true
-goals = true
-# 从网关拉取模型列表
-api_key_model_discovery = true`
-}
+export { buildCodexConfig, CODEX_WEBSOCKET_ENABLED_BY_DEFAULT } from './codex-config'
 
 interface CodexCcSwitchImportInput {
   apiKey: string
@@ -127,4 +85,29 @@ export function resolveServiceRootUrl() {
   return `${origin}${normalizedApiBase.startsWith('/')
     ? normalizedApiBase
     : `/${normalizedApiBase}`}`
+}
+
+interface CodexInstallCommandInput {
+  apiKey: string
+  baseUrl: string
+  platform: 'unix' | 'windows'
+  websocketEnabled: boolean
+}
+
+// 脚本随前端静态资源发布，与页面同源，不随 API 地址前缀变化
+export function buildCodexInstallCommand(input: CodexInstallCommandInput): string {
+  const origin = typeof window === 'undefined'
+    ? ''
+    : window.location.origin
+  const baseUrl = input.baseUrl.replace(/\/+$/, '')
+  if (input.platform === 'windows') {
+    const quote = (value: string) => `'${value.replaceAll('\'', '\'\'')}'`
+    return `& ([scriptblock]::Create((irm ${origin}/codex/install.ps1))) -BaseUrl ${quote(baseUrl)} -ApiKey ${quote(input.apiKey)}${input.websocketEnabled
+      ? ' -WebSocket'
+      : ''}`
+  }
+  const quote = (value: string) => `'${value.replaceAll('\'', '\'\\\'\'')}'`
+  return `curl -fsSL ${origin}/codex/install.sh | sh -s -- --base-url ${quote(baseUrl)} --key ${quote(input.apiKey)}${input.websocketEnabled
+    ? ' --websocket'
+    : ''}`
 }
