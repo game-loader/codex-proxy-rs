@@ -54,6 +54,18 @@
         "websocket": "Make sure the reverse proxy allows Upgrade before enabling"
       }
     },
+    "models": {
+      "title": "Use non-GPT models",
+      "description": "Codex loads every model available to the current key from the gateway, so models like Kimi are picked the same way as GPT models",
+      "pick": "Switch in a session",
+      "pickDetail": "Choose from the model list, which matches the models available to the key",
+      "default": "Set the default model",
+      "defaultDetail": "Add it at the top level of config.toml for new sessions",
+      "once": "Pick at launch",
+      "onceDetail": "Applies to this launch only and leaves the config unchanged",
+      "snippet": "config.toml example for the default model",
+      "keepProvider": "Keep other fields from the config dialog"
+    },
     "troubleshooting": {
       "title": "Troubleshooting",
       "loginTitle": "Still asks to sign in",

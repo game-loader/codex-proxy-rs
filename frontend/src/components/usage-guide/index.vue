@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GuideConfigDiagram from './GuideConfigDiagram.vue'
 import GuideFlowDiagram from './GuideFlowDiagram.vue'
+import GuideModelsDiagram from './GuideModelsDiagram.vue'
 import GuideStepsDiagram from './GuideStepsDiagram.vue'
 
 defineProps<{ apiBaseUrl: string }>()
@@ -60,6 +61,10 @@ const troubleshooting = computed(() => [
 
     <ZCard :title="t('guide.config.title')" :description="t('guide.config.description')">
       <GuideConfigDiagram :api-base-url="apiBaseUrl" />
+    </ZCard>
+
+    <ZCard :title="t('guide.models.title')" :description="t('guide.models.description')">
+      <GuideModelsDiagram />
     </ZCard>
 
     <ZCard :title="t('guide.troubleshooting.title')">

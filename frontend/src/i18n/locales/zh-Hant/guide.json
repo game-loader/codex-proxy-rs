@@ -54,6 +54,18 @@
         "websocket": "打開前確認反向代理允許 Upgrade"
       }
     },
+    "models": {
+      "title": "使用非 GPT 模型",
+      "description": "Codex 從網關拉取當前 Key 可用的全部模型，Kimi 等模型和 GPT 模型一樣選擇",
+      "pick": "會話中切換",
+      "pickDetail": "在模型列表中選擇，列表與當前 Key 可用模型一致",
+      "default": "設為默認模型",
+      "defaultDetail": "寫在 config.toml 頂層，新會話默認使用",
+      "once": "單次啟動指定",
+      "onceDetail": "只對本次啟動生效，不修改配置文件",
+      "snippet": "設置默認模型的 config.toml 示例",
+      "keepProvider": "其餘字段保持配置窗口生成的內容"
+    },
     "troubleshooting": {
       "title": "常見問題",
       "loginTitle": "仍提示登錄",
