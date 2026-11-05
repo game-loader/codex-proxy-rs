@@ -16,8 +16,8 @@ use gateway_core::engine::provider::{
 use gateway_core::error::{ProviderError, ProviderErrorKind};
 use gateway_core::operation::{Feature, GenerateRequest, Operation, OperationKind};
 use gateway_core::routing::{
-    ModelCapabilities, ProviderCatalogGeneration, ProviderKind, ProviderModelCapabilities,
-    SupportLevel, UpstreamModelId,
+    ModelCapabilities, ModelPresentation, ProviderCatalogGeneration, ProviderKind,
+    ProviderModelCapabilities, SupportLevel, UpstreamModelId,
 };
 use gateway_core::upstream::{UpstreamSendState, UpstreamTransport};
 use serde_json::Value;
@@ -78,7 +78,9 @@ impl Provider for NewApiProvider {
             .map(|(model, accounts)| {
                 let model = UpstreamModelId::new(model)
                     .map_err(|_| not_sent(ProviderErrorKind::Protocol))?;
+                let presentation = model_presentation(&model);
                 Ok(ProviderModelCapabilities::new(model, model_capabilities())
+                    .with_presentation(presentation)
                     .with_catalog_accounts(accounts))
             })
             .collect()
@@ -324,6 +326,12 @@ fn model_capabilities() -> ModelCapabilities {
         .with_feature(Feature::Vision, SupportLevel::Unknown)
         .with_feature(Feature::JsonSchema, SupportLevel::Unknown)
         .with_feature(Feature::NativeContinuation, SupportLevel::Unsupported)
+}
+
+// Codex 客户端目录只列出带画像的模型；上游 `/models` 只有 ID，按 OpenAI 普通目录的通用画像处理
+// 推理档位、上下文窗口等未声明能力保持未知
+fn model_presentation(model: &UpstreamModelId) -> ModelPresentation {
+    ModelPresentation::new(Some(model.as_str().to_owned()), None).with_agent_tools(true, false)
 }
 
 fn not_sent(kind: ProviderErrorKind) -> ProviderError {

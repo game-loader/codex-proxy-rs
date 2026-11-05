@@ -2,3 +2,5 @@
 
 mod canonical;
 mod credential;
+mod provider;
+mod support;
