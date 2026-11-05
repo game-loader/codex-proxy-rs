@@ -566,8 +566,8 @@ Linux/macOS 默认目录为 `~/.codex/`，Windows 为 `%USERPROFILE%\.codex\`；
 
 ```toml
 model_provider = "OpenAI"
-model = "gpt-5.6-terra"
-review_model = "gpt-5.6-terra"
+model = "gpt-6.1-sol"
+review_model = "gpt-6.1-sol"
 model_reasoning_effort = "max"
 service_tier = "default"
 # 语音通话控制地址

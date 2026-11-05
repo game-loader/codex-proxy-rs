@@ -1,5 +1,5 @@
 // 页面配置与构建期生成的一键安装脚本共用此模板，模块不能依赖浏览器环境或应用别名
-export const CODEX_DEFAULT_MODEL = 'gpt-5.6-terra'
+export const CODEX_DEFAULT_MODEL = 'gpt-6.1-sol'
 export const CODEX_WEBSOCKET_ENABLED_BY_DEFAULT = false
 
 interface CodexConfigInput {

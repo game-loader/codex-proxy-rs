@@ -8,8 +8,8 @@ const props = defineProps<{ apiBaseUrl: string }>()
 
 const { t } = useI18n({ useScope: 'global' })
 
-// 示例模型只用于说明写法，实际可选模型以网关目录为准
-const exampleModel = 'kimi-k3.1'
+// 可用模型随 Key 与上游账号变化，示例只写占位符，具体名称从 /model 列表获取
+const exampleModel = 'model-name'
 
 const methods = computed(() => [
   {
