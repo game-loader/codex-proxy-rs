@@ -44,7 +44,9 @@ pub struct RuntimeSettingsFields {
     pub max_concurrent_per_account: u64,
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
-    pub concurrency_wait_timeout_seconds: u32,
+    pub key_queue_timeout_seconds: u32,
+    pub account_queue_timeout_seconds: u32,
+    pub switch_account_on_queue_failure: bool,
     pub max_retry_after_seconds: u32,
     pub openai_guardian_reserved_concurrency: u32,
     pub openai_account_affinity: gateway_core::account::AccountAffinity,
@@ -52,6 +54,7 @@ pub struct RuntimeSettingsFields {
     pub openai_session_affinity_ttl_hours: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
+    pub quota_reset_window_weights: gateway_core::account::ResetWindowWeights,
     pub min_codex_desktop_version: Option<String>,
     pub min_codex_cli_version: Option<String>,
     pub usage_retention_days: u64,
@@ -59,8 +62,10 @@ pub struct RuntimeSettingsFields {
     pub audit_retention_days: u64,
     pub account_error_protection: gateway_core::account::AccountErrorProtection,
     pub account_warmup_enabled: bool,
-    pub account_warmup_schedule_time: String,
+    pub account_warmup_cron: String,
     pub account_warmup_model: Option<String>,
+    #[serde(default)]
+    pub reset_credit_on_low_weekly_quota: bool,
     pub reset_credit_lead_minutes: u32,
     pub reset_credit_max_weekly_remaining_percent: Option<u32>,
 }
@@ -73,6 +78,7 @@ pub struct RuntimeSettingsView {
     pub values: RuntimeSettingsFields,
     pub config_revision: u64,
     pub smart_scheduling_defaults: gateway_core::account::SmartSchedulingConfig,
+    pub quota_reset_window_weights_defaults: gateway_core::account::ResetWindowWeights,
     pub provider_request_profiles: ProviderRequestProfiles,
     /// 固定兼容字段；值始终从 provider_request_profiles 派生
     pub openai_client_profile: Option<serde_json::Map<String, serde_json::Value>>,
@@ -146,6 +152,8 @@ impl From<(RuntimeSettings, crate::time::TimePresenter)> for RuntimeSettingsView
             provider_request_profiles,
             model_mappings: wire_model_mappings(settings.model_mappings),
             smart_scheduling_defaults: gateway_core::account::SmartSchedulingConfig::default(),
+            quota_reset_window_weights_defaults: gateway_core::account::ResetWindowWeights::default(
+            ),
             rotation_strategy: settings.rotation_strategy.as_str().to_owned(),
             updated_at_display: time.datetime(&settings.updated_at),
             updated_at: settings.updated_at,
@@ -654,7 +662,7 @@ where
     let result = state
         .admin_services()
         .proxies()
-        .probe(None, true)
+        .probe(gateway_admin::ports::proxy::ProbeRoute::Direct, true)
         .await
         .map_err(map_service_error)?;
     Ok(AdminResponse::new(
@@ -751,7 +759,9 @@ impl RuntimeSettingsFields {
                 .map_err(|_| WireValidationError::new("settingsMaxConcurrencyOverflow"))?,
             max_waiting_per_key: self.max_waiting_per_key,
             max_waiting_per_account: self.max_waiting_per_account,
-            concurrency_wait_timeout_seconds: self.concurrency_wait_timeout_seconds,
+            key_queue_timeout_seconds: self.key_queue_timeout_seconds,
+            account_queue_timeout_seconds: self.account_queue_timeout_seconds,
+            switch_account_on_queue_failure: self.switch_account_on_queue_failure,
             max_retry_after_seconds: self.max_retry_after_seconds,
             openai_guardian_reserved_concurrency: self.openai_guardian_reserved_concurrency,
             openai_account_affinity: self.openai_account_affinity,
@@ -759,6 +769,7 @@ impl RuntimeSettingsFields {
             openai_session_affinity_ttl_hours: self.openai_session_affinity_ttl_hours,
             responses_max_decompressed_body_bytes: self.responses_max_decompressed_body_bytes,
             smart_scheduling: self.smart_scheduling,
+            quota_reset_window_weights: self.quota_reset_window_weights,
             min_codex_desktop_version: self.min_codex_desktop_version,
             min_codex_cli_version: self.min_codex_cli_version,
             usage_retention_days: u32::try_from(self.usage_retention_days)
@@ -769,8 +780,9 @@ impl RuntimeSettingsFields {
                 .map_err(|_| WireValidationError::new("settingsAuditRetentionOverflow"))?,
             account_error_protection: self.account_error_protection,
             account_warmup_enabled: self.account_warmup_enabled,
-            account_warmup_schedule_time: self.account_warmup_schedule_time,
+            account_warmup_cron: self.account_warmup_cron,
             account_warmup_model: self.account_warmup_model,
+            reset_credit_on_low_weekly_quota: self.reset_credit_on_low_weekly_quota,
             reset_credit_lead_minutes: self.reset_credit_lead_minutes,
             reset_credit_max_weekly_remaining_percent: self
                 .reset_credit_max_weekly_remaining_percent,
@@ -791,7 +803,9 @@ impl From<gateway_admin::model::settings::RuntimeSettingsValues> for RuntimeSett
             max_concurrent_per_account: u64::from(settings.max_concurrent_per_account),
             max_waiting_per_key: settings.max_waiting_per_key,
             max_waiting_per_account: settings.max_waiting_per_account,
-            concurrency_wait_timeout_seconds: settings.concurrency_wait_timeout_seconds,
+            key_queue_timeout_seconds: settings.key_queue_timeout_seconds,
+            account_queue_timeout_seconds: settings.account_queue_timeout_seconds,
+            switch_account_on_queue_failure: settings.switch_account_on_queue_failure,
             max_retry_after_seconds: settings.max_retry_after_seconds,
             openai_guardian_reserved_concurrency: settings.openai_guardian_reserved_concurrency,
             openai_account_affinity: settings.openai_account_affinity,
@@ -799,6 +813,7 @@ impl From<gateway_admin::model::settings::RuntimeSettingsValues> for RuntimeSett
             openai_session_affinity_ttl_hours: settings.openai_session_affinity_ttl_hours,
             responses_max_decompressed_body_bytes: settings.responses_max_decompressed_body_bytes,
             smart_scheduling: settings.smart_scheduling,
+            quota_reset_window_weights: settings.quota_reset_window_weights,
             min_codex_desktop_version: settings.min_codex_desktop_version,
             min_codex_cli_version: settings.min_codex_cli_version,
             usage_retention_days: u64::from(settings.usage_retention_days),
@@ -806,8 +821,9 @@ impl From<gateway_admin::model::settings::RuntimeSettingsValues> for RuntimeSett
             audit_retention_days: u64::from(settings.audit_retention_days),
             account_error_protection: settings.account_error_protection,
             account_warmup_enabled: settings.account_warmup_enabled,
-            account_warmup_schedule_time: settings.account_warmup_schedule_time,
+            account_warmup_cron: settings.account_warmup_cron,
             account_warmup_model: settings.account_warmup_model,
+            reset_credit_on_low_weekly_quota: settings.reset_credit_on_low_weekly_quota,
             reset_credit_lead_minutes: settings.reset_credit_lead_minutes,
             reset_credit_max_weekly_remaining_percent: settings
                 .reset_credit_max_weekly_remaining_percent,
@@ -822,9 +838,10 @@ fn settings_validation_error(field: &'static str) -> WireValidationError {
         "account_warmup_model" => "accountWarmupModel",
         "reset_credit_lead_minutes" => "resetCreditLeadMinutes",
         "reset_credit_max_weekly_remaining_percent" => "resetCreditMaxWeeklyRemainingPercent",
-        "account_warmup_schedule_time" => "accountWarmupScheduleTime",
+        "account_warmup_cron" => "accountWarmupCron",
         "audit_retention_days" => "auditRetentionDays",
-        "concurrency_wait_timeout_seconds" => "concurrencyWaitTimeoutSeconds",
+        "key_queue_timeout_seconds" => "keyQueueTimeoutSeconds",
+        "account_queue_timeout_seconds" => "accountQueueTimeoutSeconds",
         "max_account_rotations" => "maxAccountRotations",
         "max_concurrent_per_account" => "maxConcurrentPerAccount",
         "max_waiting_per_account" => "maxWaitingPerAccount",

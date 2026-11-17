@@ -9,6 +9,14 @@ use gateway_core::error::{GatewayError, GatewayErrorKind};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+/// 认证边界提供的稳定拒绝原因，不携带认证输入
+#[derive(Clone)]
+pub(crate) struct AccessRejection(pub &'static str);
+
+/// 执行已交给 Core 观测，HTTP 入口只补充交付边界日志
+#[derive(Clone)]
+pub(crate) struct ExecutionObserved;
+
 /// OpenAI 风格的协议错误 JSON
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProtocolErrorBody {
@@ -64,6 +72,10 @@ pub(crate) fn client_error_code(code: &str) -> &str {
     }
 }
 
+pub(crate) fn is_retry_after_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("retry-after") || name.eq_ignore_ascii_case("retry-after-ms")
+}
+
 /// 为 HTTP 错误或流内失败保留原有字段，仅投影客户端需要的重试信号
 pub(crate) fn capacity_error_for_client(data: &Value) -> Option<Value> {
     const CODE_PATHS: [&str; 2] = ["/error/code", "/response/error/code"];
@@ -79,6 +91,12 @@ pub(crate) fn capacity_error_for_client(data: &Value) -> Option<Value> {
         return None;
     }
     let mut projected = data.clone();
+    // 容量等待与换号已由网关执行；旧账号的等待提示不能再次阻塞客户端的新一轮路由
+    for path in ["/headers", "/error/headers", "/response/error/headers"] {
+        if let Some(Value::Object(headers)) = projected.pointer_mut(path) {
+            headers.retain(|name, _| !is_retry_after_header(name));
+        }
+    }
     for path in CODE_PATHS {
         if let Some(code) = projected.pointer_mut(path)
             && capacity_code(code)
@@ -107,6 +125,7 @@ pub fn gateway_error_response(error: &GatewayError) -> Response {
         error.client_error_code().unwrap_or(default_code),
     )
     .into_response();
+    response.extensions_mut().insert(error.clone());
     if let Some(delay) = error.retry_after()
         && let Ok(value) = HeaderValue::from_str(
             &delay
@@ -133,6 +152,11 @@ pub const fn gateway_error_contract(
             StatusCode::BAD_REQUEST,
             "invalid_request_error",
             "invalid_request",
+        ),
+        GatewayErrorKind::PeerRoutingLoop => (
+            StatusCode::LOOP_DETECTED,
+            "invalid_request_error",
+            gateway_protocol::peer::ROUTING_LOOP_CODE,
         ),
         GatewayErrorKind::Unsupported => (
             StatusCode::BAD_REQUEST,

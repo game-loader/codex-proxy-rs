@@ -12,10 +12,10 @@
 </div>
 
 在管理端「主题」中调整颜色、字号、圆角和组件样式，保存后应用到当前浏览器。
-设置保存在浏览器本地，不会同步到服务器或其他设备。只想换配色时，选择预置主题即可
+设置保存在浏览器本地，不会同步到服务器或其他设备。只想换配色时，选择品牌色预置即可
 
 下文说明实现和扩展方式。颜色使用 Ant Design 十阶色板与项目的明暗角色规则，
-中性表面从背景和文字 Seed 派生；Vue 组件通过 CSS Variables 与 Tailwind CSS 4 使用这些值。
+中性表面从当前底色和文字基色派生；Vue 组件通过 CSS Variables 与 Tailwind CSS 4 使用这些值。
 项目不依赖 Ant Design 组件库或 CSS-in-JS
 
 > [!IMPORTANT]
@@ -26,9 +26,8 @@
 
 - **Seed 与 Map 可追踪**：主色和功能色均按 Ant Design 从 Seed 派生 P1-P10；浅色 P6 等于 Seed，深色 P6
   经过暗色色板适配。全局 `colorPrimary` 保留原始 Seed；功能色 Base 保留 P6。文字和按钮组件可在派生层做对比度校正，Seed 不随之改写
-- **主色与表面分离**：品牌色负责交互和强调，页面、容器、浮层与文字由独立的背景和文本 Seed 派生
-- **语义独立**：`success`、`warning`、`error`、`info` 不随品牌色隐式改变；未显式配置 `link`
-  时跟随 `primary`，显式配置后独立派生
+- **主色与表面分离**：品牌色负责交互和强调，页面、容器与浮层使用预设底色或自定义背景，文字由文本 Seed 派生
+- **语义独立**：成功、警告、错误、信息和链接色各自派生，不随品牌色改变
 - **无边设计**：默认依靠表面色差、间距和轻阴影表达层级；边框只用于焦点、错误和必要分隔
 - **运行时可定制**：用户输入在浏览器中实时派生，因此使用 CSS Variables，不使用构建时 SCSS 变量
 - **单一事实源**：Store 只保存最小配置，所有 Map、Alias 与未覆盖的 Component Token 均由纯函数生成
@@ -42,12 +41,11 @@
 
 - **先沿用已有设计**：先看原页面和最接近的同类实现，复用布局、控件、操作位置与状态展示，新增能力优先融入原有操作路径
   只有现有设计无法承载本次任务时才改变结构，并说明具体问题，不以个人审美或设计技能中的通用建议为由重做页面
+- **按作用范围摆放操作**，例如单行操作沿用表格已有的行操作区，整表操作沿用列表工具栏。同层内容沿用相邻区域的对齐边线，同组控件保持一致的间距，换行后仍能看出标签、控件与操作的对应关系
+- **页面文案言简意赅**，控件含义清楚就省去说明。必要的限制、失败原因和操作后果就近简述，用法和示例放在文档中
 - **文案不使用句号和分号**：自行编写的标题、标签、按钮、表单帮助、空状态、提示和错误文案不使用 `。`、句末 `.`、`；` 或 `;`，优先写成短语或简短分句
   需要表达多个要点时，按内容关系拆成字段、短行或列表，不把长段落机械替换成逗号串
   这项约定针对界面文案，URL、版本号、小数、代码、原始日志和用户输入保留原样
-- **页面直显以简洁为主**：标题、标签、按钮使用简短明确的名称或动作，说明只补必要信息，不重复标题、字段值和操作已能表达的内容，不同时用多种说明形式解释同一事实
-  页面保留当前决策必需的短提示，详细规则、背景原因、示例和低频帮助优先收进已有 Popover 或就近的帮助入口，不把实现细节写成用户教程
-  重要说明可以在 Popover 中展开，但影响当前选择的关键限制、错误原因和不可逆后果需在操作处保留简明提示，不能全部藏起来
 - **按内容选择提示方式**：Tooltip 用于短名称或单句补充，Popover 用于需要阅读、多段说明或含链接的内容，复用项目现有组件
   帮助入口需可识别、可通过键盘和触屏打开，图标提供可访问名称，不依赖悬停才能读到必要内容
 - **避免大字报**：不堆叠超大标题、口号、整屏介绍、重复副标题或大段说明卡片，页面尽快进入数据、筛选和操作
@@ -138,6 +136,7 @@ Seed 是用户配置与持久化的最小事实：
 
 ```ts
 type ThemeMode = 'system' | 'light' | 'dark'
+type ThemePresetId = 'default' | 'soft'
 type ThemeColorId = 'relay-blue' | 'deep-teal' | 'signal-violet' | 'graphite' | 'custom'
 
 interface ThemeCustomization {
@@ -157,7 +156,11 @@ interface ThemeCustomization {
 
 表格行高与卡片圆角通过 `customization.component` 的 `tableRowHeight`、`cardBorderRadius` 配置，属于组件尺寸覆盖
 
-持久化键为 `codex-proxy-rs-theme`。Store 不保存完整色板或 CSS Variables，损坏的模式、颜色与自定义值会在
+切换内置主题预设会更新草稿中的品牌色、材质、尺寸与风格，保留明暗模式以及「功能色与中性色」的设置；保存后应用到管理端
+
+表面材质可单独选择：`default` 使用简洁表面，`soft` 使用柔和光影。材质只影响表面高光、渐变与阴影，不改变配色、圆角、字号或组件尺寸
+
+持久化键为 `codex-proxy-rs-theme`，`themePreset` 缺省为 `default`。Store 不保存完整色板或 CSS Variables，损坏的模式、预设、颜色与自定义值会在
 初始化时规范化并回退到默认配置
 
 ### Map Token
@@ -201,10 +204,8 @@ Preset 的实心色使用 P6，普通 Container、Strong Container 与边界按 
 - `colorText / Heading / Secondary / Tertiary / Quaternary / Disabled`
 - `colorBorder / BorderSecondary / Split / Shadow`
 
-中继蓝使用稳定的浅色 / 深色中性基线；深海青、古风色与石墨预置额外提供各自的 `colorBgBase`、`colorTextBase`
-画像，自定义主色则只向通用中性基线注入少量色温。默认浅色采用中性锚点，默认深色使用 HSL 色调派生；带色温
-主题按外观距离平滑过渡到背景和文字 Seed 的 RGB 混色结果。稳定锚点用于 Surface 与 Shadow，Component 从角色派生，
-所有预置、自定义 Seed 和用户覆盖仍进入同一条算法，不在页面或组件中追加 HEX 特判。
+编辑器中的背景和文字基色只随明暗模式或手动设置改变。未指定 `colorBgBase` 时，页面、卡片和浮层从当前预设的明暗底色派生；无预设底色时使用模式默认值。手动设置 `colorBgBase` 后，两个模式均以该值为底色，直至单项恢复
+默认浅色采用中性锚点，默认深色使用 HSL 色调派生；自定义中性色按外观距离平滑过渡到背景和文字 Seed 的 RGB 混色结果。
 Input、阴影与其他 Component Token 从 Fill、Surface、Primary 和 Semantic 派生，不在常量文件维护整套颜色表
 
 正常文字同时检查 Layout、Container、Elevated、文字交互背景、三级 Fill，以及控件透明填充在各宿主上的合成色
@@ -242,13 +243,15 @@ Token 直接覆盖时不会自动重算同组件的其他状态；需要保持�
 | Button | `--z-button-primary-color / bg / hover-bg / active-bg`、`--z-button-secondary-bg / hover-bg / active-bg` |
 | IconButton | `--z-icon-button-secondary-bg / hover-bg / active-bg` |
 | Input | `--z-input-bg / hover-bg / active-bg / error-active-bg` 与对应 Shadow |
-| Menu | `--z-menu-item-selected-bg` |
-| Popover | `--z-popover-header-bg` |
+| Menu | `--z-menu-item-selected-bg / bg-image / shadow` |
+| Popover | `--z-popover-header-bg`、`--z-popover-shadow` |
 | Table | `--z-table-row-bg / stripe-bg / hover-bg / selected-bg / selected-hover-bg / height` |
-| Card | `--z-card-bg / border-radius / shadow` |
-| Layout | `--z-layout-sider-bg / shadow` |
+| Card | `--z-card-bg / bg-image / border-radius / shadow` |
+| Layout | `--z-layout-sider-bg / bg-image / border-radius / shadow` |
 | Scrollbar | `--z-scrollbar-thumb-bg / hover-bg` |
 | BrandMark | `--z-brand-mark-bg` |
+
+管理端侧栏由 UI 库的 `ZSidebar` 提供容器、折叠展示、两级导航与选中状态。应用提供菜单数据、品牌和底部操作插槽，在 `select` 中执行路由或插件导航；移动端遮罩与模态焦点由宿主布局持有
 
 组件状态由 UI 库的 Component 派生层统一生成，页面不维护混色系数：
 
@@ -279,15 +282,23 @@ Purple Strong Container 或 Purple Solid；同一组颜色仍由运行时色板�
 
 ## 预置主题
 
-| ID | 名称 | 主色 | 交互方向 |
-| --- | --- | --- | --- |
-| `relay-blue` | 中继蓝 | `#5983F4` | 清晰可信的冷蓝强调 |
-| `deep-teal` | 深海青 | `#0E7C72` | 冷静低饱和的青色强调 |
-| `signal-violet` | 古风色 | `#A0583D` | 温厚克制的赭色强调 |
-| `graphite` | 石墨 | `#525B66` | 近单色的灰色强调 |
+### 表面材质
 
-预置主题改变品牌主色，并可提供与该品牌匹配的浅色 / 深色背景和文字 Seed；不改变字号、密度、圆角或布局。
-所有预置与自定义主题走同一条 Surface、Map、Alias 与 Component 派生链路，不存在页面级特判
+| ID | 名称 | 推荐品牌色 | 表面 |
+| --- | --- | --- | --- |
+| `default` | 默认 | 星津夜航 | 简洁表面与轻量阴影 |
+| `soft` | 柔光 | 星津夜航 | 表面高光、渐变与分层阴影 |
+
+### 主题预设
+
+| 配色 ID | 名称 | 主色 | 推荐材质与组件 |
+| --- | --- | --- | --- |
+| `relay-blue` | 星津夜航 | `#5983F4` | 默认材质，标准控件与表格 |
+| `deep-teal` | 水墨江汀 | `#50605E` | 默认材质，6px 卡片圆角与 60px 表格行高 |
+| `signal-violet` | 粉墙回廊 | `#D395A8` | 默认材质，14px 正文与 68px 表格行高 |
+| `graphite` | 朱阙金瓦 | `#A34537` | 柔光，12px 卡片圆角与 54px 表格行高 |
+
+单独编辑品牌主色不改变尺寸和风格。预置与自定义主题使用相同的 Surface、Map、Alias 与 Component 派生链路
 
 ## 运行时架构
 
@@ -349,7 +360,8 @@ UI 构建插件 `CodexProxyUI({ themePrefix: 'z' })` 同时配置变量生成与
 
 | 区域 | 能力 |
 | --- | --- |
-| 全局 / 颜色 | 模式、预置、自定义主色、功能色、链接、基础文本与背景、派生变量查看 |
+| 全局 / 预设 | 模式、完整主题预设、表面材质 |
+| 全局 / 颜色 | 自定义主色、功能色、链接、基础文本与背景、派生变量查看 |
 | 全局 / 尺寸 | 字号、基础间距、尺寸步长、控件高度 |
 | 全局 / 风格 | 通用圆角、阴影强度 |
 | 组件 | Action、Form、Surface、Data Display、Navigation、Layout |
@@ -431,8 +443,12 @@ utility / arbitrary variant；Vue Transition、跨浏览器 Range、动态富文
 
 ### 增加预置主题
 
+在 UI 库的 `themeProfiles` 中为每个配色 ID 配置材质与 `ThemeCustomization`。内置预设不指定功能色与中性色。设置页通过 `resolveThemeProfile` 应用预设，保留预设未指定的颜色；选中状态由同一结果推导。材质由组件 Token 派生层实现
+
+单独增加品牌配色：
+
 1. 在 `ThemeColorPresetId` 增加稳定 ID
-2. 在 `themeColorPresets` 声明名称、描述与主色 Seed
+2. 在 `themeColorPresets` 声明名称、描述与主色 Seed；需要独立底色时在 `PRESET_SURFACE_BACKGROUNDS` 中指定浅色和深色值
 3. 不新增页面特判，确认预置可通过同一 `createTheme()` 派生
 4. 在浅色、深色和系统模式下检查文本、浮层、Input、表格与图表
 

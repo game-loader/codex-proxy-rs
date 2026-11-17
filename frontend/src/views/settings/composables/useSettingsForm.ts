@@ -1,6 +1,6 @@
 import type { ProtectionDraft } from '../components/error-protection/form'
 import type { rotationOptions } from '../constants'
-import type { AccountAffinity, CodexPrivacyPolicy, SmartSchedulingConfig } from '@/api'
+import type { AccountAffinity, CodexPrivacyPolicy, ResetWindowWeights, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
 import { cloneDeep, isEqual } from 'es-toolkit'
 import { computed, reactive, ref, shallowRef } from 'vue'
@@ -27,9 +27,11 @@ export function useSettingsForm() {
   const error = shallowRef('')
   const mappings = ref<Array<{ requestedModel: string, upstreamModel: string }>>([])
   const smartSchedulingDefaults = shallowRef<SmartSchedulingConfig>()
+  const quotaResetWindowWeightsDefaults = shallowRef<ResetWindowWeights>()
   const form = reactive({
     configRevision: 0,
     smartScheduling: undefined as SmartSchedulingConfig | undefined,
+    quotaResetWindowWeights: undefined as ResetWindowWeights | undefined,
     providerRequestProfiles: {} as ProviderRequestProfiles,
     codexPrivacyPolicy: { enabled: false, onError: 'skip_rule', rules: [] } as CodexPrivacyPolicy,
     requestLocationEnabled: false,
@@ -48,7 +50,9 @@ export function useSettingsForm() {
     openaiSessionAffinityTtlHours: null as number | null,
     maxWaitingPerKey: null as number | null,
     maxWaitingPerAccount: null as number | null,
-    concurrencyWaitTimeoutSeconds: null as number | null,
+    keyQueueTimeoutSeconds: null as number | null,
+    accountQueueTimeoutSeconds: null as number | null,
+    switchAccountOnQueueFailure: false,
     maxRetryAfterSeconds: null as number | null,
     responsesMaxDecompressedBodyMiB: null as number | null,
 
@@ -69,8 +73,9 @@ export function useSettingsForm() {
       probeModel: '',
     } as ProtectionDraft,
     accountWarmupEnabled: false,
-    accountWarmupScheduleTime: '08:00',
+    accountWarmupCron: [] as string[],
     accountWarmupModel: '',
+    resetCreditOnLowWeeklyQuota: false,
     resetCreditLeadMinutes: 10 as number | null,
     resetCreditMaxWeeklyRemainingPercent: null as number | null,
   })
@@ -91,7 +96,7 @@ export function useSettingsForm() {
     mappings.value = initial.mappings
   }
 
-  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'maxRetryAfterSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays') {
+  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'keyQueueTimeoutSeconds' | 'accountQueueTimeoutSeconds' | 'maxRetryAfterSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays') {
     return computed({
       get: () => (form[key] === null
         ? ''
@@ -121,7 +126,8 @@ export function useSettingsForm() {
   const resetCreditLeadMinutesValue = numericModel('resetCreditLeadMinutes')
   const resetCreditMaxWeeklyRemainingPercentValue = numericModel('resetCreditMaxWeeklyRemainingPercent')
   const usageRetentionDaysValue = numericModel('usageRetentionDays')
-  const concurrencyWaitTimeoutSecondsValue = numericModel('concurrencyWaitTimeoutSeconds')
+  const keyQueueTimeoutSecondsValue = numericModel('keyQueueTimeoutSeconds')
+  const accountQueueTimeoutSecondsValue = numericModel('accountQueueTimeoutSeconds')
   const maxRetryAfterSecondsValue = numericModel('maxRetryAfterSeconds')
 
   function applySettings(data: Awaited<ReturnType<typeof getSettings>>) {
@@ -138,11 +144,15 @@ export function useSettingsForm() {
     form.openaiSessionAffinityTtlHours = data.openaiSessionAffinityTtlHours
     form.maxWaitingPerKey = data.maxWaitingPerKey
     form.maxWaitingPerAccount = data.maxWaitingPerAccount
-    form.concurrencyWaitTimeoutSeconds = data.concurrencyWaitTimeoutSeconds
+    form.keyQueueTimeoutSeconds = data.keyQueueTimeoutSeconds
+    form.accountQueueTimeoutSeconds = data.accountQueueTimeoutSeconds
+    form.switchAccountOnQueueFailure = data.switchAccountOnQueueFailure
     form.maxRetryAfterSeconds = data.maxRetryAfterSeconds
     form.responsesMaxDecompressedBodyMiB = data.responsesMaxDecompressedBodyBytes / MIB
 
     form.smartScheduling = { ...data.smartScheduling }
+    form.quotaResetWindowWeights = { ...data.quotaResetWindowWeights }
+    quotaResetWindowWeightsDefaults.value = { ...data.quotaResetWindowWeightsDefaults }
     smartSchedulingDefaults.value = { ...data.smartSchedulingDefaults }
     form.rotationStrategy = data.rotationStrategy
     form.minCodexDesktopVersion = data.minCodexDesktopVersion ?? ''
@@ -156,8 +166,11 @@ export function useSettingsForm() {
       probeModel: data.accountErrorProtection.probeModel ?? '',
     }
     form.accountWarmupEnabled = data.accountWarmupEnabled
-    form.accountWarmupScheduleTime = data.accountWarmupScheduleTime ?? '08:00'
+    form.accountWarmupCron = data.accountWarmupCron
+      ? data.accountWarmupCron.split(';')
+      : []
     form.accountWarmupModel = data.accountWarmupModel ?? ''
+    form.resetCreditOnLowWeeklyQuota = data.resetCreditOnLowWeeklyQuota
     form.resetCreditLeadMinutes = data.resetCreditLeadMinutes
     form.resetCreditMaxWeeklyRemainingPercent = data.resetCreditMaxWeeklyRemainingPercent
     mappings.value = Object.entries(data.modelMappings).map(([requestedModel, upstreamModel]) => ({
@@ -233,12 +246,13 @@ export function useSettingsForm() {
 
   async function saveSettings() {
     const smartScheduling = form.smartScheduling
-    if (!smartScheduling)
+    const quotaResetWindowWeights = form.quotaResetWindowWeights
+    if (!smartScheduling || !quotaResetWindowWeights)
       return
     const savedSettings = saved.value
     if (saving.value || loading.value || detectingLocation.value || !savedSettings)
       return
-    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, maxRetryAfterSeconds, responsesMaxDecompressedBodyMiB } = form
+    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, keyQueueTimeoutSeconds, accountQueueTimeoutSeconds, maxRetryAfterSeconds, responsesMaxDecompressedBodyMiB } = form
     const { resetCreditMaxWeeklyRemainingPercent, resetCreditLeadMinutes, usageRetentionDays } = form
     // 关闭时保留已保存的自定义值，未完成的草稿不阻止停止覆盖。
     const requestLocation = form.requestLocationEnabled
@@ -267,11 +281,14 @@ export function useSettingsForm() {
         openaiSessionAffinityTtlHours: openaiSessionAffinityTtlHours!,
         maxWaitingPerKey: maxWaitingPerKey!,
         maxWaitingPerAccount: maxWaitingPerAccount!,
-        concurrencyWaitTimeoutSeconds: concurrencyWaitTimeoutSeconds!,
+        keyQueueTimeoutSeconds: keyQueueTimeoutSeconds!,
+        accountQueueTimeoutSeconds: accountQueueTimeoutSeconds!,
+        switchAccountOnQueueFailure: form.switchAccountOnQueueFailure,
         maxRetryAfterSeconds: maxRetryAfterSeconds!,
         responsesMaxDecompressedBodyBytes: responsesMaxDecompressedBodyMiB! * MIB,
         rotationStrategy: rotationStrategy as RotationStrategy,
         smartScheduling: { ...smartScheduling },
+        quotaResetWindowWeights: { ...quotaResetWindowWeights },
         minCodexDesktopVersion: form.minCodexDesktopVersion.trim() || null,
         minCodexCliVersion: form.minCodexCliVersion.trim() || null,
         usageRetentionDays: usageRetentionDays!,
@@ -285,9 +302,10 @@ export function useSettingsForm() {
           probeModel: trimProtectionText(form.accountErrorProtection.probeModel) || null,
         },
         accountWarmupEnabled: form.accountWarmupEnabled,
-        accountWarmupScheduleTime: form.accountWarmupScheduleTime.trim(),
+        accountWarmupCron: form.accountWarmupCron.join(';'),
         accountWarmupModel: form.accountWarmupModel.trim() || null,
-        resetCreditLeadMinutes: resetCreditLeadMinutes!,
+        resetCreditOnLowWeeklyQuota: form.resetCreditOnLowWeeklyQuota,
+        resetCreditLeadMinutes: (form.resetCreditOnLowWeeklyQuota ? savedSettings.form.resetCreditLeadMinutes : resetCreditLeadMinutes)!,
         resetCreditMaxWeeklyRemainingPercent,
       })
       applySettings(result)
@@ -315,6 +333,7 @@ export function useSettingsForm() {
     error,
     form,
     smartSchedulingDefaults,
+    quotaResetWindowWeightsDefaults,
     mappings,
     addMapping,
     updateMapping,
@@ -327,7 +346,8 @@ export function useSettingsForm() {
     openaiSessionAffinityTtlHoursValue,
     maxWaitingPerKeyValue,
     maxWaitingPerAccountValue,
-    concurrencyWaitTimeoutSecondsValue,
+    keyQueueTimeoutSecondsValue,
+    accountQueueTimeoutSecondsValue,
     maxRetryAfterSecondsValue,
     responsesMaxDecompressedBodyMiBValue,
     usageRetentionDaysValue,

@@ -2,6 +2,7 @@
 
 mod reset_credit_automation;
 
+use gateway_core::engine::probe::AccountProbeTarget;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -713,6 +714,7 @@ impl FakeAccountStore {
 
     fn page_item(account: AccountRecord) -> AccountPageItem {
         let facts = AccountStatusFacts {
+            quota_paused: false,
             enabled: account.enabled,
             credential_state: account.credential_state,
             access_token_expires_at: account.access_token_expires_at.map(Into::into),
@@ -787,6 +789,7 @@ impl AccountStore for FakeAccountStore {
             summary: AccountSummary {
                 total,
                 normal: 1,
+                quota_paused: 0,
                 quota_exhausted: 0,
                 rate_limited: 0,
                 disabled: 0,
@@ -1081,6 +1084,7 @@ impl AccountStore for FakeAccountStore {
     async fn batch_update_accounts(
         &self,
         command: BatchUpdateAccounts,
+        _: gateway_admin::model::accounts::PreparedQuotaPauses,
         context: &MutationContext,
     ) -> AdminStoreResult<AccountsUpdateResult> {
         self.record("store.batch_update_accounts");
@@ -1127,6 +1131,7 @@ impl AccountStore for FakeAccountStore {
 
 #[derive(Default)]
 struct StaticSettingsStore {
+    reset_credit_on_low_weekly_quota: bool,
     reset_credit_max_weekly_remaining_percent: Option<u32>,
 }
 
@@ -1165,7 +1170,9 @@ impl SettingsStore for StaticSettingsStore {
                 max_concurrent_per_account: 1,
                 max_waiting_per_key: 0,
                 max_waiting_per_account: 0,
-                concurrency_wait_timeout_seconds: 30,
+                key_queue_timeout_seconds: 30,
+                account_queue_timeout_seconds: 30,
+                switch_account_on_queue_failure: false,
                 max_retry_after_seconds: 240,
                 openai_guardian_reserved_concurrency: 0,
                 openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
@@ -1173,6 +1180,7 @@ impl SettingsStore for StaticSettingsStore {
                 openai_session_affinity_ttl_hours: 24,
                 responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
                 smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
+                quota_reset_window_weights: gateway_core::account::ResetWindowWeights::default(),
                 min_codex_desktop_version: None,
                 min_codex_cli_version: None,
                 usage_retention_days: 30,
@@ -1180,9 +1188,10 @@ impl SettingsStore for StaticSettingsStore {
                 audit_retention_days: 30,
                 account_error_protection: gateway_core::account::AccountErrorProtection::default(),
                 account_warmup_enabled: false,
-                account_warmup_schedule_time: "08:00".to_owned(),
+                account_warmup_cron: "0 8 * * *".to_owned(),
                 account_warmup_model: None,
                 reset_credit_lead_minutes: 10,
+                reset_credit_on_low_weekly_quota: self.reset_credit_on_low_weekly_quota,
                 reset_credit_max_weekly_remaining_percent: self
                     .reset_credit_max_weekly_remaining_percent,
             },
@@ -1335,7 +1344,9 @@ async fn connection_test_should_probe_unavailable_account() {
     let events = services
         .accounts()
         .test_connection(
-            ProviderAccountId::new("acct_test").expect("account ID"),
+            AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_test").expect("account ID"),
+            ),
             gateway_core::routing::UpstreamModelId::new("grok-4.5").expect("model"),
         )
         .await
@@ -1372,7 +1383,9 @@ async fn connection_test_rate_limited_probe_returns_provider_failure() {
     let events = services
         .accounts()
         .test_connection(
-            ProviderAccountId::new("acct_test").expect("account ID"),
+            AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_test").expect("account ID"),
+            ),
             gateway_core::routing::UpstreamModelId::new("grok-4.5").expect("model"),
         )
         .await
@@ -1405,7 +1418,9 @@ async fn connection_test_should_preserve_disabled_account_status() {
     let events = services
         .accounts()
         .test_connection(
-            ProviderAccountId::new("acct_test").expect("account ID"),
+            AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_test").expect("account ID"),
+            ),
             gateway_core::routing::UpstreamModelId::new("grok-4.5").expect("model"),
         )
         .await
@@ -1899,6 +1914,8 @@ async fn accounts_batch_update_should_commit_once_and_notify_each_provider() {
         .batch_update(
             &context("batch-update-request"),
             BatchUpdateAccounts {
+                quota_settings: None,
+                auto_use_quota_credits: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
                 account_ids: vec!["acct_openai".to_owned(), "acct_xai".to_owned()],
@@ -2066,6 +2083,7 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
     let events = events();
     let openai = FakeProviderAdmin::new("openai", events.clone());
     openai.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         upstream: None,
         credits: None,
         plan_type: None,
@@ -2226,6 +2244,7 @@ async fn accounts_list_should_map_unknown_credential_to_error_not_normal() {
 async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         upstream: None,
         credits: None,
         plan_type: None,
@@ -2277,6 +2296,7 @@ async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view()
 async fn accounts_list_should_not_derive_exhaustion_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         upstream: None,
         credits: None,
         plan_type: None,
@@ -2686,12 +2706,15 @@ async fn peer_account_usage_should_follow_budget_windows_without_borrowing_pool_
     for longest in [86_400, 604_800] {
         let provider = FakeProviderAdmin::new("openai", events());
         let mut account = account_record("openai");
+        account.concurrency_limit = None;
         account.authentication_kind = "api_key".to_owned();
         account.created_at = Utc::now() - TimeDelta::days(60);
         let store = FakeAccountStore::with_account(account, events());
         let reset_at = Utc::now() + TimeDelta::hours(1);
         let mut quota = empty_quota();
         quota.upstream = Some(ProviderUpstreamInfo {
+            max_concurrency: Some(7),
+            requests_per_minute: Some(60),
             discovered: true,
             observed_at: Some(Utc::now()),
             stale: false,
@@ -2762,6 +2785,8 @@ async fn peer_account_usage_should_follow_budget_windows_without_borrowing_pool_
             page.items[0].usage.as_ref().unwrap().total_tokens,
             Some(1_234)
         );
+        assert_eq!(page.items[0].capacity.total_slots, Some(7));
+        assert_eq!(page.items[0].account.concurrency_limit, None);
         let queries = store.quota_window_queries();
         assert_eq!(queries.len(), window_usage.len());
         for (query, expected) in queries.iter().zip(&window_usage) {
@@ -2878,6 +2903,7 @@ async fn accounts_list_should_attach_local_usage_to_quota_windows() {
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::hours(1);
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         upstream: None,
         credits: None,
         plan_type: None,
@@ -3042,6 +3068,7 @@ async fn accounts_list_should_not_attach_account_usage_to_model_specific_quota_w
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::days(7);
     provider.set_quota(ProviderQuota {
+        paused_windows: Vec::new(),
         upstream: None,
         credits: None,
         plan_type: None,
@@ -3347,6 +3374,7 @@ pub(super) fn document() -> ProviderDocument {
 
 fn empty_quota() -> ProviderQuota {
     ProviderQuota {
+        paused_windows: Vec::new(),
         upstream: None,
         credits: None,
         plan_type: None,
@@ -3384,6 +3412,9 @@ fn quota_local_usage(account_id: &str, total_tokens: u64) -> AccountUsage {
 pub(super) fn account_record(kind: &str) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        quota_paused: false,
+        quota_settings: Default::default(),
+        auto_use_quota_credits: false,
         outbound_proxy_id: None,
         outbound_proxy_enabled: true,
         notes: None,

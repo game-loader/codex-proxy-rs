@@ -20,7 +20,9 @@ pub struct SettingsValues {
     pub(crate) max_concurrent_per_account: u32,
     pub(crate) max_waiting_per_key: u32,
     pub(crate) max_waiting_per_account: u32,
-    pub(crate) concurrency_wait_timeout_seconds: u32,
+    pub(crate) key_queue_timeout_seconds: u32,
+    pub(crate) account_queue_timeout_seconds: u32,
+    pub(crate) switch_account_on_queue_failure: bool,
     pub(crate) max_retry_after_seconds: u32,
     pub(crate) openai_guardian_reserved_concurrency: u32,
     pub(crate) openai_account_affinity: crate::account::AccountAffinity,
@@ -28,6 +30,8 @@ pub struct SettingsValues {
     pub(crate) openai_session_affinity_ttl_hours: u32,
     pub(crate) responses_max_decompressed_body_bytes: u64,
     pub(crate) smart_scheduling: crate::account::SmartSchedulingConfig,
+    #[serde(default)]
+    pub(crate) quota_reset_window_weights: crate::account::ResetWindowWeights,
     pub(crate) rotation_strategy: String,
     pub(crate) model_mappings: Arc<BTreeMap<String, String>>,
     pub(crate) min_codex_desktop_version: Option<String>,
@@ -110,6 +114,15 @@ impl SettingsValues {
     }
 
     #[must_use]
+    pub const fn with_quota_reset_window_weights(
+        mut self,
+        weights: crate::account::ResetWindowWeights,
+    ) -> Self {
+        self.quota_reset_window_weights = weights;
+        self
+    }
+
+    #[must_use]
     pub const fn with_smart_scheduling(
         mut self,
         config: crate::account::SmartSchedulingConfig,
@@ -158,11 +171,15 @@ impl SettingsValues {
         mut self,
         max_waiting_per_key: u32,
         max_waiting_per_account: u32,
-        timeout_seconds: u32,
+        key_timeout_seconds: u32,
+        account_timeout_seconds: u32,
+        switch_on_failure: bool,
     ) -> Self {
         self.max_waiting_per_key = max_waiting_per_key;
         self.max_waiting_per_account = max_waiting_per_account;
-        self.concurrency_wait_timeout_seconds = timeout_seconds;
+        self.key_queue_timeout_seconds = key_timeout_seconds;
+        self.account_queue_timeout_seconds = account_timeout_seconds;
+        self.switch_account_on_queue_failure = switch_on_failure;
         self
     }
 
@@ -185,7 +202,9 @@ impl SettingsValues {
             max_concurrent_per_account,
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
-            concurrency_wait_timeout_seconds: 30,
+            key_queue_timeout_seconds: 30,
+            account_queue_timeout_seconds: 30,
+            switch_account_on_queue_failure: false,
             max_retry_after_seconds: 240,
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: crate::account::AccountAffinity::default(),
@@ -193,6 +212,7 @@ impl SettingsValues {
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: crate::account::SmartSchedulingConfig::default(),
+            quota_reset_window_weights: crate::account::ResetWindowWeights::default(),
             rotation_strategy: rotation_strategy.into(),
             model_mappings: Arc::new(model_mappings),
             min_codex_desktop_version,
@@ -221,7 +241,8 @@ impl SettingsValues {
 pub fn validate_request_limits(
     max_waiting_per_key: u32,
     max_waiting_per_account: u32,
-    timeout_seconds: u32,
+    key_timeout_seconds: u32,
+    account_timeout_seconds: u32,
     max_account_rotations: u32,
     affinity_ttl_hours: u32,
 ) -> Result<(), &'static str> {
@@ -229,8 +250,12 @@ pub fn validate_request_limits(
         (max_waiting_per_key <= 1_000, "max_waiting_per_key"),
         (max_waiting_per_account <= 1_000, "max_waiting_per_account"),
         (
-            (1..=120).contains(&timeout_seconds),
-            "concurrency_wait_timeout_seconds",
+            (1..=120).contains(&key_timeout_seconds),
+            "key_queue_timeout_seconds",
+        ),
+        (
+            (1..=120).contains(&account_timeout_seconds),
+            "account_queue_timeout_seconds",
         ),
         (
             max_account_rotations <= crate::account::MAX_ACCOUNT_ROTATIONS,

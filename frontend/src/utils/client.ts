@@ -94,20 +94,20 @@ interface CodexInstallCommandInput {
   websocketEnabled: boolean
 }
 
-// 脚本随前端静态资源发布，与页面同源，不随 API 地址前缀变化
+// 脚本随前端静态资源发布，与页面同源并位于部署前缀下，不随 API 地址前缀变化
 export function buildCodexInstallCommand(input: CodexInstallCommandInput): string {
-  const origin = typeof window === 'undefined'
+  const scripts = `${typeof window === 'undefined'
     ? ''
-    : window.location.origin
+    : window.location.origin}${import.meta.env.BASE_URL}codex`
   const baseUrl = input.baseUrl.replace(/\/+$/, '')
   if (input.platform === 'windows') {
     const quote = (value: string) => `'${value.replaceAll('\'', '\'\'')}'`
-    return `& ([scriptblock]::Create((irm ${origin}/codex/install.ps1))) -BaseUrl ${quote(baseUrl)} -ApiKey ${quote(input.apiKey)}${input.websocketEnabled
+    return `& ([scriptblock]::Create((irm ${scripts}/install.ps1))) -BaseUrl ${quote(baseUrl)} -ApiKey ${quote(input.apiKey)}${input.websocketEnabled
       ? ' -WebSocket'
       : ''}`
   }
   const quote = (value: string) => `'${value.replaceAll('\'', '\'\\\'\'')}'`
-  return `curl -fsSL ${origin}/codex/install.sh | sh -s -- --base-url ${quote(baseUrl)} --key ${quote(input.apiKey)}${input.websocketEnabled
+  return `curl -fsSL ${scripts}/install.sh | sh -s -- --base-url ${quote(baseUrl)} --key ${quote(input.apiKey)}${input.websocketEnabled
     ? ' --websocket'
     : ''}`
 }

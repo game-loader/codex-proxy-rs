@@ -1,5 +1,6 @@
 //! 单行 `model_requests`、账号重试与下游提交屏障测试
 
+use gateway_core::engine::probe::AccountProbeTarget;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU32;
 use std::sync::{
@@ -1227,6 +1228,7 @@ fn plan_with_protection(
             None,
         )
         .with_smart_scheduling(account_selection_policy.smart_scheduling())
+        .with_quota_reset_window_weights(account_selection_policy.quota_reset_window_weights())
         .with_max_account_rotations(account_selection_policy.max_account_rotations())
         .with_openai_account_affinity(account_selection_policy.openai_account_affinity())
         .with_openai_session_affinity_ttl_hours(
@@ -2490,6 +2492,124 @@ fn native_continuation_uses_provider_defined_owner_then_cross_account_recovery()
 }
 
 #[test]
+fn native_capacity_above_wait_limit_rotates_before_requesting_client_replay() {
+    for (seconds, replacement, rotations, expected_attempts) in [
+        (309, true, 1, 2),
+        (309, false, 1, 2),
+        (240, true, 1, 1),
+        (309, true, 0, 1),
+    ] {
+        let Operation::Generate(generate) = generate_operation() else {
+            unreachable!()
+        };
+        let operation =
+            Operation::Generate(generate.with_provider_session_state(
+                ProviderSessionState::new("openai", Map::new()).unwrap(),
+            ));
+        let route_plan = plan_with_protection(
+            &operation,
+            AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::MIN)
+                .with_max_account_rotations(rotations),
+            Default::default(),
+            FastMode::Default,
+            BTreeMap::new(),
+            Default::default(),
+            240,
+        );
+        let original_body = Bytes::from_static(br#"{"error":{"code":"server_is_overloaded","headers":{"retry-after":"309","retry-after-ms":"309000"}}}"#);
+        let original = transient_rejection()
+            .with_retry_after(Duration::from_secs(seconds))
+            .with_raw_upstream_error(gateway_core::error::RawUpstreamError::new(
+                String::from_utf8(original_body.to_vec()).unwrap(),
+            ))
+            .with_continuation_recovery_disposition(
+                ContinuationRecoveryDisposition::ClientReplayRequired,
+            );
+        let recovery = if replacement {
+            ProviderError::new(
+                ProviderErrorKind::ContinuationRecoveryRequired,
+                UpstreamSendState::NotSent,
+            )
+            .with_continuation_recovery_disposition(
+                ContinuationRecoveryDisposition::ClientReplayRequired,
+            )
+            .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
+                "Resend full history.",
+                Some("previous_response_not_found".to_owned()),
+                Some("invalid_request_error".to_owned()),
+            ))
+        } else {
+            ProviderError::new(
+                ProviderErrorKind::NoEligibleAccount,
+                UpstreamSendState::NotSent,
+            )
+        };
+        let (coordinator, store, provider) = coordinator(vec![
+            Script::Stream {
+                account_id: "acct_one",
+                items: vec![Err(original)],
+            },
+            Script::Error(recovery),
+        ]);
+        let continuation = NativeContinuationPin::new(
+            PreviousResponseId::new("client-previous"),
+            PreviousResponseId::new("upstream-previous"),
+            ClientApiKeyId::new("key_client_1").unwrap(),
+            ProviderKind::new("openai").unwrap(),
+            ProviderAccountId::new("acct_one").unwrap(),
+        )
+        .with_scope(gateway_core::engine::continuation::NativeContinuationScope::ConnectionLocal);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            Some(ContinuationBinding::Pinned(continuation)),
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        let mut collection = Box::pin(session.collect_uncommitted());
+        let std::task::Poll::Ready(Err(EngineError::Provider(error))) =
+            block_on(async { futures::poll!(&mut collection) })
+        else {
+            panic!("native capacity recovery must not wait on the old account");
+        };
+        drop(collection);
+        assert_eq!(error.kind(), ProviderErrorKind::UpstreamCapacityUnavailable);
+        assert_eq!(error.send_state(), UpstreamSendState::Sent);
+        assert_eq!(error.retry_after(), Some(Duration::from_secs(seconds)));
+        assert_eq!(
+            error.raw_upstream_error().unwrap().as_str().as_bytes(),
+            original_body.as_ref()
+        );
+        assert_eq!(
+            error
+                .client_visible_upstream_error()
+                .and_then(|detail| detail.code()),
+            (replacement && expected_attempts == 2).then_some("previous_response_not_found")
+        );
+        let contexts = provider.contexts.lock().unwrap();
+        assert_eq!(contexts.len(), expected_attempts);
+        if contexts.len() == 2 {
+            assert_eq!(
+                contexts[1].continuation_attempt(),
+                ContinuationAttempt::RotateForClientReplay
+            );
+            assert!(
+                contexts[1]
+                    .excluded_accounts()
+                    .contains(&ProviderAccountId::new("acct_one").unwrap())
+            );
+            assert!(contexts[1].required_account().is_none());
+        }
+        assert_eq!(
+            store.state.lock().unwrap().finalizations[0].attempt_count,
+            1
+        );
+    }
+}
+
+#[test]
 fn native_continuation_client_replay_required_is_terminal() {
     for (kind, send_state) in [
         (
@@ -2753,7 +2873,7 @@ fn continuation_history_failure_without_replay_proof_is_delivered_without_hidden
 }
 
 #[test]
-fn diagnostic_account_reaches_provider_and_matching_metadata_succeeds() {
+fn recovery_probe_reaches_provider_with_read_only_account() {
     let operation = generate_operation();
     let route_plan = plan(&operation);
     let (coordinator, _, provider) = coordinator(vec![Script::Stream {
@@ -2765,7 +2885,7 @@ fn diagnostic_account_reaches_provider_and_matching_metadata_succeeds() {
         model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
         operation,
         route_plan,
-        required.clone(),
+        AccountProbeTarget::FreezeRecovery(required.clone()),
         None,
         CancellationToken::new(),
     ))
@@ -2777,6 +2897,11 @@ fn diagnostic_account_reaches_provider_and_matching_metadata_succeeds() {
     assert_eq!(contexts.len(), 1);
     assert_eq!(contexts[0].required_account(), Some(&required));
     assert!(contexts[0].is_diagnostic_required_account());
+    assert!(
+        !contexts[0]
+            .account_eligibility()
+            .allows_account_state_mutation(true)
+    );
 }
 
 #[test]
@@ -4315,6 +4440,87 @@ fn retry_after_above_the_configured_limit_rotates_without_waiting() {
                     .excluded_accounts()
                     .contains(&ProviderAccountId::new("acct_first").unwrap())
             );
+        }
+    }
+}
+
+#[test]
+fn no_more_retry_skips_same_account_wait_even_when_retry_after_is_short() {
+    let advised = Duration::from_secs(30);
+    for (rejection, rotates) in [
+        (
+            transient_rejection()
+                .with_same_account_retry_blocked()
+                .with_retry_after(advised),
+            true,
+        ),
+        (
+            transient_rejection()
+                .with_transient_retry(
+                    NonZeroU32::MIN,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    TransientRetryPolicy::RetryThenReturnError,
+                )
+                .with_same_account_retry_blocked()
+                .with_retry_after(advised),
+            false,
+        ),
+    ] {
+        let operation = generate_operation();
+        let route_plan = retry_after_plan(&operation, 240);
+        let mut scripts = vec![Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(rejection)],
+        }];
+        if rotates {
+            scripts.push(Script::Stream {
+                account_id: "acct_second",
+                items: complete_stream(None),
+            });
+        }
+        let (coordinator, _, provider) = coordinator(scripts);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        let trace = session.trace().clone();
+        let mut collection = Box::pin(session.collect_uncommitted());
+        let polled = block_on(async { futures::poll!(&mut collection) });
+        let trace = trace.snapshot().unwrap();
+        let retry = trace["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["stage"] == "retry.decided")
+            .unwrap();
+        assert_eq!(retry["data"]["sameAccountRetryBlocked"], true);
+        assert_eq!(retry["data"]["transientRetry"], false);
+        assert_eq!(retry["data"]["retryAfterExceeded"], false);
+        if rotates {
+            assert!(matches!(polled, std::task::Poll::Ready(Ok(_))));
+            drop(collection);
+            let contexts = provider.contexts.lock().unwrap();
+            assert_eq!(contexts.len(), 2);
+            assert_eq!(contexts[1].required_account(), None);
+            assert!(
+                contexts[1]
+                    .excluded_accounts()
+                    .contains(&ProviderAccountId::new("acct_first").unwrap())
+            );
+        } else {
+            assert!(matches!(
+                polled,
+                std::task::Poll::Ready(Err(EngineError::Provider(error)))
+                    if error.retry_after() == Some(advised)
+            ));
+            assert_eq!(provider.contexts.lock().unwrap().len(), 1);
         }
     }
 }
@@ -7397,7 +7603,9 @@ fn error_protection_tracks_real_retry_attempts_and_skips_diagnostic_runs() {
                         request,
                         operation,
                         route_plan,
-                        ProviderAccountId::new("acct_first").unwrap(),
+                        AccountProbeTarget::ConnectionTest(
+                            ProviderAccountId::new("acct_first").unwrap(),
+                        ),
                         None,
                         CancellationToken::new(),
                     )

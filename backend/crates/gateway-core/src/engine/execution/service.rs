@@ -411,23 +411,7 @@ impl DefaultExecutionService {
         started_at: SystemTime,
         request_id: Option<ModelRequestId>,
     ) -> Result<StartedExecution, GatewayError> {
-        crate::engine::image_generation::check_image_generation(
-            authorization.account_scope.allows_image_generation(),
-            &request.operation,
-        )?;
         let request_id = request_id.map_or_else(new_request_id, Ok)?;
-        if authorization.cancellation.is_cancelled() {
-            return Err(GatewayError::new(
-                GatewayErrorKind::Cancelled,
-                "Parent request was cancelled.",
-            ));
-        }
-        if authorization.deadline_at.is_elapsed() {
-            return Err(GatewayError::new(
-                GatewayErrorKind::Timeout,
-                "Request deadline elapsed.",
-            ));
-        }
         let account_group_ids = authorization
             .account_scope
             .routing_snapshot()
@@ -494,6 +478,22 @@ impl DefaultExecutionService {
         let budget_key_id = request.client.policy.key_id().clone();
         let mut entered_execution = false;
         let result = async {
+            crate::engine::image_generation::check_image_generation(
+                authorization.account_scope.allows_image_generation(),
+                &request.operation,
+            )?;
+            if authorization.cancellation.is_cancelled() {
+                return Err(GatewayError::new(
+                    GatewayErrorKind::Cancelled,
+                    "Parent request was cancelled.",
+                ));
+            }
+            if authorization.deadline_at.is_elapsed() {
+                return Err(GatewayError::new(
+                    GatewayErrorKind::Timeout,
+                    "Request deadline elapsed.",
+                ));
+            }
             if request_policy.is_some() {
                 start_guard = Some(self.prepare_execution_start(&request, &request_id, &mut authorization).await?);
             }
@@ -680,7 +680,7 @@ impl DefaultExecutionService {
                 request_id = request_id.as_str(),
                 key_id = budget_key_id.as_str(),
                 failure_kind = error.kind().as_str(),
-                "请求在路由或准入阶段被拒绝"
+                "请求在执行前被拒绝"
             );
             let rejection = crate::engine::EntryRejection {
                 request_id: request_id.clone(),
@@ -724,7 +724,6 @@ impl DefaultExecutionService {
         request_id: &ModelRequestId,
         authorization: &mut AuthorizedExecution,
     ) -> Result<ExecutionStartGuard, GatewayError> {
-        let concurrency_wait_budget = ConcurrencyWaitBudget::default();
         let (admission, admission_decision_ms) = if authorization.nested.is_some() {
             let permit = authorization.nested_permit.take().ok_or_else(|| {
                 GatewayError::new(
@@ -741,7 +740,6 @@ impl DefaultExecutionService {
                     request_id,
                     authorization.deadline_at,
                     authorization.cancellation.clone(),
-                    &concurrency_wait_budget,
                 )
                 .await?;
             let admission = if let Some(permit) = authorization.nested_permit.take() {
@@ -774,7 +772,6 @@ impl DefaultExecutionService {
         Ok(ExecutionStartGuard {
             admission,
             active_request,
-            concurrency_wait_budget,
             admission_decision_ms,
         })
     }
@@ -802,19 +799,40 @@ impl DefaultExecutionService {
         let ExecutionStartGuard {
             admission,
             active_request,
-            concurrency_wait_budget,
             admission_decision_ms,
         } = start_guard;
-        let observation = plan
-            .candidates()
-            .first()
-            .map_or_else(Default::default, |candidate| {
-                providers.request_observation(
-                    candidate.provider(),
-                    &operation,
-                    client.policy.key_id(),
-                )
+        let observation_provider = match &target {
+            ExecutionTarget::ProviderEndpoint { provider, .. } => Some(provider),
+            ExecutionTarget::Model(_) => plan
+                .candidates()
+                .iter()
+                .find(|candidate| {
+                    operation
+                        .provider_session_state(candidate.provider().as_str())
+                        .is_some_and(|state| state.extension_owner().is_none())
+                })
+                .or_else(|| plan.candidates().first())
+                .map(|candidate| candidate.provider()),
+        };
+        let provider_observation =
+            observation_provider.map_or_else(Default::default, |candidate| {
+                providers.request_observation(candidate, &operation, client.policy.key_id())
             });
+        // 纯协议事实不依赖候选顺序，Provider 仅补充所属会话的旧配置和恢复关联
+        let observation = match &operation {
+            Operation::Generate(request) => {
+                let payload = request.protocol_payload();
+                gateway_protocol::request::request_observation(
+                    payload.protocol(),
+                    payload.body(),
+                    payload.context(),
+                    provider_observation
+                        .previous_reasoning_effort_override
+                        .as_deref(),
+                )
+            }
+            _ => Default::default(),
+        };
         let (request_kind, subagent_kind) = if let Some(nested) = authorization.nested.as_ref() {
             (
                 Some("plugin_child_model".to_owned()),
@@ -847,7 +865,9 @@ impl DefaultExecutionService {
             operation: operation.kind(),
             endpoint: metadata.endpoint,
             client_transport: metadata.transport.as_str().to_owned(),
-            requested_model: target.into_public_model().or(observation.requested_model),
+            requested_model: target
+                .into_public_model()
+                .or(provider_observation.requested_model),
             client_ip: metadata.client_ip,
             user_agent: metadata.user_agent,
             reasoning_effort: observation.reasoning_effort,
@@ -855,7 +875,7 @@ impl DefaultExecutionService {
             request_kind,
             subagent_kind,
             compact: observation.compact,
-            continuation: observation.continuation,
+            continuation: provider_observation.continuation,
             image_generation_requested: operation.image_generation_requested(),
             admission_decision_ms,
             started_at,
@@ -884,7 +904,7 @@ impl DefaultExecutionService {
             )
             .await
         {
-            Ok(core) => core.with_concurrency_wait_budget(concurrency_wait_budget),
+            Ok(core) => core,
             Err(error) => {
                 if let Some(budget) = &self.budget {
                     settle_budget(
@@ -1245,13 +1265,13 @@ impl DefaultExecutionService {
         request_id: &ModelRequestId,
         deadline_at: Deadline,
         cancellation: CancellationToken,
-        budget: &ConcurrencyWaitBudget,
     ) -> Result<AdmissionLease, GatewayError> {
         let policy = client.snapshot.client_queue_policy();
         let limits = client.policy.limits();
         let key = client.policy.key_id();
+        let budget = ConcurrencyWaitBudget::default();
         let mut waiting =
-            CapacityWait::new(&self.admission_waiting, policy, deadline_at.at(), budget);
+            CapacityWait::new(&self.admission_waiting, policy, deadline_at.at(), &budget);
         let mut admission = AdmissionLease {
             port: Arc::clone(&self.admissions),
             diagnostics: self.diagnostics.clone(),
@@ -1334,14 +1354,14 @@ impl DefaultExecutionService {
         frozen: Option<Arc<crate::routing::RuntimeSnapshot>>,
     ) -> Result<AccountProbeResult, AccountProbeError> {
         let AccountProbeRequest {
-            account_id,
+            target,
             provider_kind,
             upstream_model,
             operation,
         } = request;
         let observed = ProbeObservation {
             provider_kind: provider_kind.clone(),
-            account_id: account_id.clone(),
+            account_id: target.account_id().clone(),
             upstream_model: upstream_model.clone(),
         };
         let snapshot = frozen
@@ -1402,7 +1422,7 @@ impl DefaultExecutionService {
                 new_request,
                 operation,
                 plan,
-                account_id,
+                target,
                 None,
                 CancellationToken::new(),
             )
@@ -1467,7 +1487,18 @@ impl DefaultExecutionService {
             }
             _ => (AccountProbeErrorSource::Gateway, None, None),
         };
+        let mut failure = AccountProbeError::new(
+            gateway_error_from_engine(error),
+            source,
+            send_state,
+            upstream_response,
+        );
         if let EngineError::Provider(provider_error) = error {
+            if source == AccountProbeErrorSource::Provider {
+                failure.proxy_hint = provider_error
+                    .diagnostic()
+                    .and_then(|diagnostic| diagnostic.proxy_hint());
+            }
             let latency = started_at.elapsed().unwrap_or_default();
             let latency_ms = u64::try_from(latency.as_millis()).unwrap_or(u64::MAX);
             tracing::warn!(
@@ -1503,12 +1534,7 @@ impl DefaultExecutionService {
                 );
             }
         }
-        AccountProbeError::new(
-            gateway_error_from_engine(error),
-            source,
-            send_state,
-            upstream_response,
-        )
+        failure
     }
 }
 
@@ -1557,6 +1583,7 @@ impl ExecutionService for DefaultExecutionService {
         client: &'a AuthenticatedClient,
         protocol: &'a str,
         client_version: &'a str,
+        peer_route: Option<&'a http::HeaderValue>,
     ) -> BoxFuture<'a, Result<Vec<PublicModelDescriptor>, ProviderCatalogUnavailable>> {
         Box::pin(async move {
             let scope = client.policy.account_scope();
@@ -1566,7 +1593,13 @@ impl ExecutionService for DefaultExecutionService {
             for kind in scope.provider_kinds() {
                 let provider = providers.get(kind).ok_or(ProviderCatalogUnavailable)?;
                 let Some(models) = provider
-                    .query_client_model_catalog(scope, protocol, client_version)
+                    .query_client_model_catalog(
+                        client.policy.key_id(),
+                        scope,
+                        protocol,
+                        client_version,
+                        peer_route,
+                    )
                     .await?
                 else {
                     for profile in client.snapshot.profiles_for_provider_scope(kind, scope) {
@@ -1792,7 +1825,7 @@ impl NestedModelExecutionPort for DefaultExecutionService {
             let cancelled = cancellation.cancelled().fuse();
             let timeout = Delay::new(DIAGNOSTIC_TIMEOUT).fuse();
             let catalog = self
-                .client_model_catalog(&client, &protocol, &client_version)
+                .client_model_catalog(&client, &protocol, &client_version, None)
                 .fuse();
             pin_mut!(cancelled, timeout, catalog);
             let models = select_biased! {

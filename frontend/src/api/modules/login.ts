@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../constants'
 import request from '../request'
 
 export interface AuthSession {
@@ -72,8 +73,8 @@ export function getLoginOptions() {
   })
 }
 
-// 飞书授权是顶层导航，回调由服务端写会话 Cookie 并跳转
-export const FEISHU_AUTHORIZE_URL = '/api/auth/feishu/authorize'
+// 飞书授权是顶层导航，回调由服务端写会话 Cookie 并跳转；不经请求封装，需自带部署前缀
+export const FEISHU_AUTHORIZE_URL = `${API_BASE_URL}/api/auth/feishu/authorize`
 
 export function refreshAuthSession() {
   return withSessionLock(() => request<AuthStatusResponse>({

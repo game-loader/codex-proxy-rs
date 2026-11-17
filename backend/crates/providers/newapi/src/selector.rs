@@ -128,7 +128,12 @@ impl NewApiSelector {
                             not_sent(ProviderErrorKind::ProviderInfrastructureUnavailable)
                         })?
                         .with_runtime_health(failure_rate, latency);
-                    Ok(AccountCandidate { account, signals })
+                    Ok(AccountCandidate {
+                        // 中转站不上报账号并发上限
+                        inherited_concurrency: None,
+                        account,
+                        signals,
+                    })
                 })
                 .collect::<Result<Vec<_>, ProviderError>>()?;
             let mut selection_context = AccountSelectionContext {

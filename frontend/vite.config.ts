@@ -3,16 +3,17 @@ import CodexProxyUI from '@codex-proxy/ui/vite'
 import VueI18n from '@intlify/unplugin-vue-i18n/vite'
 import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import { codexInstallScripts } from './build/codex-install/index.ts'
 import { pluginBridge } from './build/plugin-bridge.ts'
 
 export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), 'CPR_WEB_BASE_PATH')
   const sourceUi = mode === 'source'
   const uiRoot = new URL('../modules/ui/', import.meta.url)
 
   return {
-    base: '/',
+    base: env.CPR_WEB_BASE_PATH || '/',
     plugins: [
       vue(),
       VueI18n({

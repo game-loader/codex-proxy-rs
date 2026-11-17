@@ -142,6 +142,7 @@ async fn dashboard_summary_should_include_quota_exhaustion_in_unavailable_headli
         provider_accounts: AccountPoolMetrics {
             total: 1002,
             normal: 943,
+            quota_paused: 0,
             quota_exhausted: 52,
             rate_limited: 0,
             disabled: 3,
@@ -425,7 +426,7 @@ async fn usage_detail_should_keep_attempt_snapshot_contract() {
                 upstream_transport: Some("http_sse".to_owned()),
                 upstream_send_state: Some("sent".to_owned()),
                 outcome: gateway_admin::model::observability::RequestOutcome::Failed,
-                downstream_committed: false,
+                downstream_committed: None,
                 status_code: Some(429),
                 provider_error_code: Some("rate_limit".to_owned()),
                 failure_kind: Some("rate_limited".to_owned()),
@@ -462,6 +463,8 @@ async fn usage_detail_should_keep_attempt_snapshot_contract() {
         .await
         .expect("usage detail body");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("usage detail JSON");
+    assert_eq!(value["data"]["errorOrigin"], "upstream");
+    assert!(value["data"]["attempts"][0]["downstreamCommitted"].is_null());
     assert_eq!(value["data"]["errorKind"], "continuation_recovery_required");
     assert_eq!(value["data"]["errorCode"], "previous_response_not_found");
     assert_eq!(
@@ -702,6 +705,8 @@ fn peer_summary(
 ) -> gateway_admin::model::provider_credentials::ProviderQuota {
     gateway_admin::model::provider_credentials::ProviderQuota {
         upstream: Some(gateway_admin::model::upstream_info::ProviderUpstreamInfo {
+            max_concurrency: None,
+            requests_per_minute: None,
             discovered,
             observed_at: observed.then(chrono::Utc::now),
             stale: true,
@@ -755,7 +760,9 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
                 average_latency_ms: Some(100),
                 latency_p95_ms: Some(3800),
                 first_token_p95_ms: Some(1200),
-                non_completion_count: 0,
+                cancelled_count: 0,
+                incomplete_count: 0,
+                caller_error_count: 0,
                 retry_count: 3,
                 retried_request_count: 1,
                 cost_coverage: CostCoverage::default(),
@@ -977,6 +984,7 @@ async fn usage_route_projects_request_facts_and_billing() {
         .expect("usage records")
         .push(UsageListRecord {
             provider_account_upstream_peer: None,
+            has_upstream_error: false,
             error_code: None,
             error_message: None,
             error_kind: None,
@@ -985,6 +993,7 @@ async fn usage_route_projects_request_facts_and_billing() {
             upstream_connection_exit_reason: None,
             recovered: false,
             client_status_code: None,
+            upstream_status_code: None,
             outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
             client_api_key_name: Some("Production".to_owned()),
             id: "request_endpoint".to_owned(),
@@ -1074,6 +1083,8 @@ async fn usage_route_projects_request_facts_and_billing() {
         let mut failed = records[0].clone();
         failed.id = "request_failed".to_owned();
         failed.outcome = gateway_admin::model::observability::RequestOutcome::Failed;
+        failed.client_status_code = Some(503);
+        failed.upstream_status_code = Some(429);
         failed.error_code = Some("server_error".to_owned());
         failed.error_message = Some("The upstream service is temporarily unavailable.".to_owned());
         records.push(failed);
@@ -1107,6 +1118,19 @@ async fn usage_route_projects_request_facts_and_billing() {
     assert!(value["data"]["items"][0]["errorCode"].is_null());
     assert!(value["data"]["items"][0]["errorMessage"].is_null());
     assert_eq!(value["data"]["items"][3]["errorCode"], "server_error");
+    assert_eq!(value["data"]["items"][3]["clientStatusCode"], 503);
+    assert_eq!(value["data"]["items"][3]["upstreamStatusCode"], 429);
+    assert_eq!(value["data"]["items"][3]["errorOrigin"], "upstream");
+    assert_eq!(value["data"]["items"][4]["errorOrigin"], "upstream");
+    assert_eq!(value["data"]["items"][0]["errorOrigin"], "unknown");
+    assert_eq!(
+        value["data"]["items"][4].get("upstreamStatusCode"),
+        Some(&serde_json::Value::Null)
+    );
+    assert_eq!(
+        value["data"]["items"][4].get("clientStatusCode"),
+        Some(&serde_json::Value::Null)
+    );
     assert_eq!(value["data"]["items"][4]["logicalOutcome"], "incomplete");
     assert_eq!(
         value["data"]["items"][4]["errorKind"],

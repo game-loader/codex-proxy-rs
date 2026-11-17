@@ -116,6 +116,7 @@ fn selected_usage_window(quota: &ProviderQuota) -> Option<(&str, AccountUsagePer
 
 fn usage_quota(windows: Vec<ProviderQuotaWindow>) -> ProviderQuota {
     ProviderQuota {
+        paused_windows: Vec::new(),
         upstream: None,
         credits: None,
         plan_type: None,
@@ -168,6 +169,7 @@ fn usage_window(key: &str, group: &str, seconds: u64) -> ProviderQuotaWindow {
 #[test]
 fn dashboard_quota_should_preserve_unknown_and_actual_window_facts() {
     let mut quota = ProviderQuota {
+        paused_windows: Vec::new(),
         upstream: None,
         credits: None,
         plan_type: None,
@@ -267,7 +269,8 @@ fn pending_mutation_v1_should_round_trip_all_targets_and_owners() {
                         gateway_core::account::OutboundProxy::parse(
                             "http://user:secret@proxy.example:8080",
                         )
-                        .unwrap(),
+                        .unwrap()
+                        .with_max_websocket_connections(16),
                     ))
                     .with_outbound_proxy_id(Some("proxy_saved".to_owned()));
                 assert_eq!(
@@ -293,6 +296,27 @@ fn pending_mutation_v1_should_keep_existing_storage_fields_and_reject_invalid_do
     let restored =
         PendingAuthorizationMutation::from_storage_v1(legacy.clone()).expect("v1 document");
     assert_eq!(Value::Object(restored.to_storage_v1()), legacy);
+    let mut legacy_proxy = legacy.clone();
+    legacy_proxy["outbound_proxy_url"] = json!("socks5h://proxy.example.invalid:1080");
+    legacy_proxy["outbound_proxy_id"] = json!("proxy_saved");
+    let restored = PendingAuthorizationMutation::from_storage_v1(legacy_proxy.clone())
+        .expect("legacy proxy without a capacity field remains readable");
+    assert_eq!(
+        restored
+            .outbound_proxy()
+            .unwrap()
+            .max_websocket_connections(),
+        0
+    );
+    assert_eq!(Value::Object(restored.to_storage_v1()), legacy_proxy);
+    for invalid in [json!(-1), json!(4294967296_u64), json!("16")] {
+        let mut document = legacy_proxy.clone();
+        document["outbound_proxy_max_websocket_connections"] = invalid;
+        assert!(PendingAuthorizationMutation::from_storage_v1(document).is_err());
+    }
+    let mut missing_proxy = legacy.clone();
+    missing_proxy["outbound_proxy_max_websocket_connections"] = json!(16);
+    assert!(PendingAuthorizationMutation::from_storage_v1(missing_proxy).is_err());
     for (pointer, invalid) in [
         ("/provider_kind", json!("")),
         ("/target/account_id", json!("")),

@@ -300,7 +300,8 @@ impl ProviderAdmin for NewApiAdminProvider {
         // 只投影非敏感连接设置，不回显密钥
         let mut document = Map::new();
         document.insert("base_url".to_owned(), Value::String(credential.base_url));
-        // 只支持 HTTP/SSE，传输方式固定投影给编辑表单
+        // 只支持 Responses HTTP/SSE，协议与传输方式固定投影给编辑表单
+        document.insert("protocol".to_owned(), Value::String("responses".to_owned()));
         document.insert("transport".to_owned(), Value::String("http".to_owned()));
         Ok(Some(ProviderDocument::new(OpaqueProviderData::new(
             document,
@@ -318,6 +319,7 @@ impl ProviderAdmin for NewApiAdminProvider {
             observed_at: None,
             refresh_token_expires_at: None,
             windows: Vec::new(),
+            paused_windows: Vec::new(),
             credits: None,
             limit_reached: false,
             provider_data: None,

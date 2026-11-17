@@ -304,6 +304,12 @@ impl PendingAuthorizationMutation {
                 "outbound_proxy_url".to_owned(),
                 Value::String(proxy.expose_url().to_owned()),
             );
+            if proxy.max_websocket_connections() != 0 {
+                document.insert(
+                    "outbound_proxy_max_websocket_connections".to_owned(),
+                    Value::from(proxy.max_websocket_connections()),
+                );
+            }
         }
         if let Some(id) = &self.outbound_proxy_id {
             document.insert("outbound_proxy_id".to_owned(), Value::String(id.clone()));
@@ -344,6 +350,11 @@ impl PendingAuthorizationMutation {
             .map(gateway_core::account::OutboundProxy::parse)
             .transpose()
             .map_err(|_| invalid())?;
+        let proxy = match (proxy, document.outbound_proxy_max_websocket_connections) {
+            (Some(proxy), Some(limit)) => Some(proxy.with_max_websocket_connections(limit)),
+            (None, Some(_)) => return Err(invalid()),
+            (proxy, None) => proxy,
+        };
         Ok(Self::new(
             provider_kind,
             target,
@@ -366,6 +377,8 @@ struct StoredAuthorizationMutationV1 {
     started_request_id: String,
     #[serde(default)]
     outbound_proxy_url: Option<String>,
+    #[serde(default)]
+    outbound_proxy_max_websocket_connections: Option<u32>,
     #[serde(default)]
     outbound_proxy_id: Option<String>,
 }
@@ -832,6 +845,7 @@ pub struct ProviderQuotaReadRequest<'a> {
 /// Provider 已解析的 quota 结果及其不透明差异字段
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ProviderQuota {
+    pub paused_windows: Vec<String>,
     pub upstream: Option<super::upstream_info::ProviderUpstreamInfo>,
     /// 上游额度响应明确提供的套餐，可用于补全账号展示
     pub plan_type: Option<String>,
@@ -839,7 +853,7 @@ pub struct ProviderQuota {
     pub refresh_token_expires_at: Option<DateTime<Utc>>,
     pub windows: Vec<ProviderQuotaWindow>,
     pub credits: Option<ProviderQuotaCredits>,
-    /// 展示用快照级触顶事实（顶层或任一窗口触顶）；不参与账号五态派生
+    /// 展示用快照级触顶事实（顶层或任一窗口触顶）；不参与账号状态派生
     pub limit_reached: bool,
     pub provider_data: Option<ProviderDocument>,
 }

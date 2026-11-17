@@ -6,10 +6,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use gateway_core::account::{
-    AccountStateChange, CredentialCasOutcome, CredentialCasUpdate, CredentialRevision,
-    LoadedCredential, NewProviderAccount, OpaqueProviderData, PlaintextCredential, ProviderAccount,
-    ProviderAccountId, ProviderAccountStore, ProviderAccountUpdate, ProviderRefreshQuery,
-    QuotaAccessChange, QuotaObservation, QuotaObservationTouch, QuotaWriteOutcome,
+    AccountCatalogObservation, AccountStateChange, CredentialCasOutcome, CredentialCasUpdate,
+    CredentialRevision, LoadedCredential, NewProviderAccount, OpaqueProviderData,
+    PlaintextCredential, ProviderAccount, ProviderAccountId, ProviderAccountStore,
+    ProviderAccountUpdate, ProviderRefreshQuery, QuotaAccessChange, QuotaObservation,
+    QuotaObservationTouch, QuotaWriteOutcome, StoredAccountCatalog,
 };
 use gateway_core::diagnostics::{OperationalDiagnostics, OperationalFailure};
 use gateway_core::error::{StoreError, StoreErrorKind};
@@ -18,14 +19,14 @@ use gateway_core::policy::ClientApiKeyId;
 use gateway_core::provider_ports::{
     NewOAuthPendingFlow, OAuthPendingBinding, OAuthPendingClaimOutcome, OAuthPendingConsumeOutcome,
     OAuthPendingFlowPort, OAuthPendingPutOutcome, OAuthPendingReleaseOutcome,
-    ProviderArtifactProfile, ProviderArtifactProfileCachePort, ProviderCatalogCacheKey,
-    ProviderCatalogCachePort, ProviderConcurrencyPool, ProviderCooldown, ProviderCooldownPort,
-    ProviderCooldownScope, ProviderCredentialState, ProviderCredentialStatePort,
-    ProviderLeaseAcquisition, ProviderLeasePort, ProviderLeaseRequest, ProviderRefreshPolicy,
-    ProviderRuntimePolicyPort, ProviderSchedulingState, ProviderScopedCooldown,
-    ProviderSessionAffinityKey, ProviderSessionAffinityPort, ProviderSessionAlias,
-    ProviderSessionBinding, ProviderSessionExclusionPort, ProviderSessionExclusions,
-    ProviderStoreError, ProviderStoreErrorKind, ProviderStorePorts,
+    ProviderAccountAdmission, ProviderArtifactProfile, ProviderArtifactProfileCachePort,
+    ProviderCatalogCacheKey, ProviderCatalogCachePort, ProviderConcurrencyPool, ProviderCooldown,
+    ProviderCooldownPort, ProviderCooldownScope, ProviderCredentialState,
+    ProviderCredentialStatePort, ProviderLeaseAcquisition, ProviderLeasePort, ProviderLeaseRequest,
+    ProviderRefreshPolicy, ProviderRuntimePolicyPort, ProviderSchedulingState,
+    ProviderScopedCooldown, ProviderSessionAffinityKey, ProviderSessionAffinityPort,
+    ProviderSessionAlias, ProviderSessionBinding, ProviderSessionExclusionPort,
+    ProviderSessionExclusions, ProviderStoreError, ProviderStoreErrorKind, ProviderStorePorts,
 };
 use provider_newapi::{AUTHENTICATION_KIND, NewApiCredential, PROVIDER_NAME};
 
@@ -87,6 +88,21 @@ fn store_unused() -> StoreError {
 
 #[async_trait]
 impl ProviderAccountStore for StaticAccounts {
+    async fn load_account_catalogs(
+        &self,
+        _: &ProviderKind,
+    ) -> Result<Vec<StoredAccountCatalog>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn save_account_catalog(
+        &self,
+        _: &AccountCatalogObservation,
+        _: &[u8],
+    ) -> Result<bool, StoreError> {
+        Err(store_unused())
+    }
+
     async fn create_account(&self, _: NewProviderAccount) -> Result<(), StoreError> {
         Err(store_unused())
     }
@@ -111,6 +127,20 @@ impl ProviderAccountStore for StaticAccounts {
         } else {
             Vec::new()
         })
+    }
+
+    async fn list_for_provider_accounts(
+        &self,
+        provider: &ProviderKind,
+        account_ids: &[ProviderAccountId],
+    ) -> Result<Vec<ProviderAccount>, StoreError> {
+        Ok(
+            if provider == self.account.provider() && account_ids.contains(self.account.id()) {
+                vec![self.account.clone()]
+            } else {
+                Vec::new()
+            },
+        )
     }
 
     async fn list_refresh_candidates(
@@ -226,14 +256,19 @@ impl ProviderSessionAffinityPort for Unused {
         unused_future()
     }
 
-    fn compare_and_bind<'a>(
+    fn round_robin_cursor<'a>(
         &'a self,
         _: &'a ProviderKind,
-        _: &'a ProviderSessionAffinityKey,
-        _: Option<&'a ProviderSessionBinding>,
-        _: &'a ProviderAccountId,
-        _: Duration,
-    ) -> BoxFuture<'a, Result<Option<ProviderSessionBinding>, ProviderStoreError>> {
+        _: &'a ClientApiKeyId,
+    ) -> BoxFuture<'a, Result<u64, ProviderStoreError>> {
+        unused_future()
+    }
+
+    fn admit_account<'a>(
+        &'a self,
+        _: &'a ProviderKind,
+        _: ProviderAccountAdmission<'a>,
+    ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
         unused_future()
     }
 
@@ -368,6 +403,13 @@ impl ProviderCooldownPort for Unused {
         unused_future()
     }
 
+    fn read_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderCooldown>, ProviderStoreError>>> {
+        Box::pin(async move { account_ids.iter().map(|_| Err(port_unused())).collect() })
+    }
+
     fn clear<'a>(
         &'a self,
         _: &'a ProviderAccountId,
@@ -389,6 +431,14 @@ impl ProviderCooldownPort for Unused {
         _: &'a ProviderCooldownScope,
     ) -> BoxFuture<'a, Result<Option<ProviderScopedCooldown>, ProviderStoreError>> {
         unused_future()
+    }
+
+    fn read_scoped_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+        _: &'a ProviderCooldownScope,
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderScopedCooldown>, ProviderStoreError>>> {
+        Box::pin(async move { account_ids.iter().map(|_| Err(port_unused())).collect() })
     }
 
     fn clear_scoped<'a>(

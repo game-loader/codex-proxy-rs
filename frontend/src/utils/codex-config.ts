@@ -44,10 +44,10 @@ remote_compaction = "v2"
 X-OpenAI-Actor-Authorization = "proxy-managed"
 
 [features]
+api_key_model_discovery = true
+async_compaction = true
 image_generation = true
-goals = true
-# 从网关拉取模型列表
-api_key_model_discovery = true`
+goals = true`
 }
 
 export function buildCodexConfig(input: CodexConfigInput): string {

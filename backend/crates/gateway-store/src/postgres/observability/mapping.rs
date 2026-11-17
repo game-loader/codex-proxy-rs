@@ -174,7 +174,7 @@ pub(crate) fn admin_account_model_usage(
     admin_observability::AccountModelUsage {
         model: usage.model,
         request_count: usage.request_count,
-        success_count: usage.success_count,
+        health: usage.health,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         cached_input_tokens: usage.cached_input_tokens,
@@ -290,7 +290,9 @@ fn admin_diagnostic_observation(
         average_latency_ms: observation.average_latency_ms,
         latency_p95_ms: observation.latency_p95_ms,
         first_token_p95_ms: observation.first_token_p95_ms,
-        non_completion_count: observation.non_completion_count,
+        cancelled_count: observation.cancelled_count,
+        incomplete_count: observation.incomplete_count,
+        caller_error_count: observation.caller_error_count,
         retry_count: observation.retry_count,
         retried_request_count: observation.retried_request_count,
         cost_coverage: admin_cost_coverage(observation.cost_coverage),
@@ -363,6 +365,7 @@ pub(crate) fn usage_list_record_from_row(
         cost_currency.as_deref(),
     )?;
     Ok(UsageListRecord {
+        has_upstream_error: get(row, "has_upstream_error")?,
         error_code: get(row, "error_code")?,
         error_message: get(row, "error_message")?,
         error_kind: get(row, "error_kind")?,
@@ -372,6 +375,7 @@ pub(crate) fn usage_list_record_from_row(
         upstream_connection_exit_reason: get(row, "upstream_connection_exit_reason")?,
         recovered: get(row, "recovered")?,
         client_status_code: optional_status(row, "client_status_code")?,
+        upstream_status_code: optional_status(row, "upstream_status_code")?,
         outcome: admin_observability::RequestOutcome::new(get::<String>(row, "outcome")?)
             .map_err(|_| invalid("invalid request outcome"))?,
         client_api_key_name: get(row, "client_api_key_name")?,

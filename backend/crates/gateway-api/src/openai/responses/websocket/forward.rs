@@ -16,13 +16,14 @@ use gateway_core::engine::response_control::{ResponseControl, ResponseControlUna
 use gateway_core::error::{GatewayError, GatewayErrorKind};
 use gateway_core::event::ProviderResponseHeader;
 use gateway_core::operation::ProviderSessionState;
+use gateway_protocol::openai::OPENAI_PROTOCOL;
 
 use crate::openai::error::{gateway_error_contract, gateway_error_from_engine};
 use crate::openai::middleware::{PendingExecution, pending_execution_response};
 use crate::openai::responses::validation::{ResponseValidationFacts, ResponsesDeliveryValidator};
 
 use super::{
-    super::{DecodedResponsesRequest, OpenAiResponsesEncoder, ProtocolErrorBody},
+    super::{DecodedGenerationRequest, OpenAiResponsesEncoder, ProtocolErrorBody},
     connection::{
         ConnectionEvent, FramePhase, ResponsesWebSocketConnection, WriteContext, WriteOutcome,
     },
@@ -45,7 +46,7 @@ pub(super) struct ConnectionReplaySnapshot {
 }
 
 impl ConnectionReplaySnapshot {
-    pub(super) fn prepare(&self, request: DecodedResponsesRequest) -> DecodedResponsesRequest {
+    pub(super) fn prepare(&self, request: DecodedGenerationRequest) -> DecodedGenerationRequest {
         match (
             request.metadata().continuation().previous_response_id(),
             self.last_response_id.as_deref(),
@@ -118,7 +119,7 @@ pub(super) async fn execution_response(
                 .collect();
             // 失败也要保留会话到洋葱链返回，否则释放会话会取消仍在等待 next 的插件
             return Ok(pending_execution_response(
-                "openai".to_owned(),
+                OPENAI_PROTOCOL.to_owned(),
                 status,
                 response_headers,
                 MiddlewareFrame::new(
@@ -142,7 +143,7 @@ pub(super) async fn execution_response(
         .map(|header| MiddlewareHeader::new(header.name(), header.value().clone()))
         .collect();
     Ok(MiddlewareResponse::new(
-        "openai".to_owned(),
+        OPENAI_PROTOCOL.to_owned(),
         200,
         headers,
         Box::new(body),
@@ -159,7 +160,7 @@ pub(super) async fn forward_response(
     response_control: &ResponseControl,
 ) -> ForwardOutcome {
     let (protocol, status, headers, mut body, _) = response.into_parts();
-    if protocol != "openai" || StatusCode::from_u16(status).is_err() {
+    if protocol != OPENAI_PROTOCOL || StatusCode::from_u16(status).is_err() {
         return fail_body(connection, body, MiddlewareError::InvalidState, &request_id).await;
     }
     let response_headers = headers
@@ -170,6 +171,7 @@ pub(super) async fn forward_response(
         })
         .collect::<Vec<_>>();
     let mut interrupt = super::interrupt::ResponseInterrupt::default();
+    let mut reconnect_after_terminal = false;
     let first = match next_body_input(
         connection,
         body.as_mut(),
@@ -177,6 +179,7 @@ pub(super) async fn forward_response(
         &mut interrupt,
         &request_id,
         false,
+        &mut reconnect_after_terminal,
     )
     .await
     {
@@ -231,6 +234,7 @@ pub(super) async fn forward_response(
                     &mut interrupt,
                     &request_id,
                     terminal_write.is_some(),
+                    &mut reconnect_after_terminal,
                 )
                 .await
                 {
@@ -252,7 +256,11 @@ pub(super) async fn forward_response(
                             .filter(|_| terminal_write == Some(WriteOutcome::Written));
                         let outcome = replay.commit(&capture, delivered);
                         body.close().await;
-                        return outcome;
+                        return if reconnect_after_terminal {
+                            ForwardOutcome::ReconnectIfIdle
+                        } else {
+                            outcome
+                        };
                     }
                     BodyInput::Frame(Ok(None)) => {
                         return fail_body(
@@ -348,6 +356,7 @@ async fn next_body_input(
     interrupt: &mut super::interrupt::ResponseInterrupt,
     request_id: &Arc<str>,
     terminal_seen: bool,
+    reconnect_after_terminal: &mut bool,
 ) -> BodyInput {
     // 处理控制帧时继续持有同一个读取 future，不能取消正在加工正文的中间件
     let frame = body.next_frame();
@@ -383,8 +392,11 @@ async fn next_body_input(
                 }
             }
             event = response_control.receive(), if terminal_seen => {
-                if forward_control_event(connection, response_control, event).await == ForwardOutcome::Disconnect {
-                    return BodyInput::Disconnect;
+                match forward_control_event(connection, response_control, event).await {
+                    ForwardOutcome::Disconnect => return BodyInput::Disconnect,
+                    // 终态写出后仍需完成结算，失效通知留到响应收尾后再触发空闲关闭
+                    ForwardOutcome::ReconnectIfIdle => *reconnect_after_terminal = true,
+                    ForwardOutcome::Continue => {}
                 }
             }
             frame = &mut frame => return BodyInput::Frame(frame),
@@ -824,7 +836,7 @@ pub(super) async fn forward_control_event(
 ) -> ForwardOutcome {
     let Ok(payload) = event else {
         control.clear();
-        return ForwardOutcome::Continue;
+        return ForwardOutcome::ReconnectIfIdle;
     };
     if connection
         .send_text(payload, WriteContext::connection(FramePhase::Data))

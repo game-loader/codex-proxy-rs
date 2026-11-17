@@ -5,7 +5,7 @@ use gateway_core::account::OpaqueProviderData;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::{CodexWireProfile, CodexWireProfileState};
+use super::{CodexWireProfile, CodexWireProfileState, baseline};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -25,8 +25,8 @@ pub enum CliEntry {
 impl CliEntry {
     pub const fn originator(self) -> &'static str {
         match self {
-            Self::Tui => "codex-tui",
-            Self::Exec => "codex_exec",
+            Self::Tui => baseline::TUI_ORIGINATOR,
+            Self::Exec => baseline::EXEC_ORIGINATOR,
         }
     }
 }
@@ -41,25 +41,22 @@ pub enum ClientPlatform {
 
 impl ClientPlatform {
     pub const fn os_type(self) -> &'static str {
-        match self {
-            Self::Macos => "Mac OS",
-            Self::Linux => "Linux",
-            Self::Windows => "Windows",
-        }
+        self.default_environment().os_type
     }
 
     fn default_os_version(self) -> &'static str {
-        match self {
-            Self::Macos => "15.7.1",
-            Self::Linux => "6.8.0",
-            Self::Windows => "10.0.26100",
-        }
+        self.default_environment().os_version
     }
 
     fn default_arch(self) -> &'static str {
+        self.default_environment().arch
+    }
+
+    const fn default_environment(self) -> baseline::Environment {
         match self {
-            Self::Macos => "arm64",
-            Self::Linux | Self::Windows => "x86_64",
+            Self::Macos => baseline::MACOS_ENVIRONMENT,
+            Self::Linux => baseline::LINUX_ENVIRONMENT,
+            Self::Windows => baseline::WINDOWS_ENVIRONMENT,
         }
     }
 }
@@ -116,9 +113,14 @@ impl Default for ClientProfileSelection {
 
 impl ClientProfileSelection {
     pub fn parse(document: &OpaqueProviderData) -> Result<Self, ClientProfileError> {
-        let selection: Self =
-            serde_json::from_value(Value::Object(document.expose_to_provider().clone()))
-                .map_err(|_| ClientProfileError::Invalid)?;
+        Self::from_fields(document.expose_to_provider().clone())
+    }
+
+    pub(super) fn from_fields(
+        fields: serde_json::Map<String, Value>,
+    ) -> Result<Self, ClientProfileError> {
+        let selection: Self = serde_json::from_value(Value::Object(fields))
+            .map_err(|_| ClientProfileError::Invalid)?;
         selection.validate()?;
         Ok(selection)
     }
@@ -133,8 +135,10 @@ impl ClientProfileSelection {
 
     fn default_originator(&self) -> &'static str {
         match self.client {
-            ClientKind::Desktop => "Codex Desktop",
-            ClientKind::Cli => self.cli_entry.map_or("codex_cli_rs", CliEntry::originator),
+            ClientKind::Desktop => baseline::DESKTOP_ORIGINATOR,
+            ClientKind::Cli => self
+                .cli_entry
+                .map_or(baseline::CLI_ORIGINATOR, CliEntry::originator),
         }
     }
 
@@ -270,14 +274,15 @@ impl ClientProfileSelection {
             terminal: self
                 .terminal
                 .clone()
-                .unwrap_or_else(|| "unknown".to_owned()),
+                .unwrap_or_else(|| baseline::TERMINAL.to_owned()),
             exact_user_agent: None,
+            installation_seed: None,
             residency: deployment.residency,
             account_routing_override: deployment.account_routing_override,
             verified_at: release.verified_at.unwrap_or(DateTime::UNIX_EPOCH),
         };
         if let Some(entry) = self.cli_entry {
-            // 入口后缀使用同一次解析得到的 Core 版本，避免每日更新后头部与后缀混用
+            // 入口后缀使用同一次解析得到的 Core 版本，避免版本更新后头部与后缀混用
             // originator 可单独覆盖；入口名与官方 clientInfo.name 的语义保持一致
             profile.exact_user_agent = Some(format!(
                 "{} ({}; {})",
@@ -364,7 +369,7 @@ impl CodexWireProfileState {
                     "configuration": configuration,
                     "automaticAvailable": available,
                     "reason": (!available).then_some("暂不支持自动更新"),
-                    "defaults": { "originator": configuration.default_originator(), "osType": platform.os_type(), "osVersion": platform.default_os_version(), "arch": platform.default_arch(), "terminal": "unknown" },
+                    "defaults": { "originator": configuration.default_originator(), "osType": platform.os_type(), "osVersion": platform.default_os_version(), "arch": platform.default_arch(), "terminal": baseline::TERMINAL },
                 }));
             }
         }
@@ -383,6 +388,8 @@ pub(crate) fn object(value: &impl Serialize) -> Result<OpaqueProviderData, Clien
 pub enum ClientProfileError {
     #[error("客户端身份字段或版本组合不合法")]
     Invalid,
+    #[error("安装身份种子必须是带连字符的 UUID")]
+    InvalidInstallationSeed,
     #[error("User-Agent 必须是 1 至 4096 字节的单行 ASCII 文本，且首尾不能含空白")]
     InvalidUserAgent,
     #[error("无法识别 User-Agent，请补充 originator 和有效的 Core version")]

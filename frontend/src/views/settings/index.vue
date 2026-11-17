@@ -82,6 +82,7 @@ const {
   error,
   form,
   smartSchedulingDefaults,
+  quotaResetWindowWeightsDefaults,
   mappings,
   addMapping,
   updateMapping,
@@ -94,7 +95,8 @@ const {
   openaiSessionAffinityTtlHoursValue,
   maxWaitingPerKeyValue,
   maxWaitingPerAccountValue,
-  concurrencyWaitTimeoutSecondsValue,
+  keyQueueTimeoutSecondsValue,
+  accountQueueTimeoutSecondsValue,
   maxRetryAfterSecondsValue,
   responsesMaxDecompressedBodyMiBValue,
   usageRetentionDaysValue,
@@ -196,7 +198,9 @@ watch(section, (value) => {
           <RotationStrategyCard
             v-model="form.rotationStrategy"
             v-model:smart-scheduling="form.smartScheduling"
+            v-model:quota-reset-window-weights="form.quotaResetWindowWeights"
             :smart-defaults="smartSchedulingDefaults"
+            :quota-reset-defaults="quotaResetWindowWeightsDefaults"
             :disabled="disabled"
             :options="rotationOptions"
           />
@@ -210,18 +214,21 @@ watch(section, (value) => {
             v-model:max-concurrent-per-account="maxConcurrentPerAccountValue"
             v-model:max-waiting-per-key="maxWaitingPerKeyValue"
             v-model:max-waiting-per-account="maxWaitingPerAccountValue"
-            v-model:concurrency-wait-timeout-seconds="concurrencyWaitTimeoutSecondsValue"
+            v-model:key-queue-timeout-seconds="keyQueueTimeoutSecondsValue"
+            v-model:account-queue-timeout-seconds="accountQueueTimeoutSecondsValue"
+            v-model:switch-account-on-queue-failure="form.switchAccountOnQueueFailure"
             v-model:max-retry-after-seconds="maxRetryAfterSecondsValue"
             v-model:openai-guardian-reserved-concurrency="openaiGuardianReservedConcurrencyValue"
           />
           <AccountErrorProtectionCard v-model="form.accountErrorProtection" :disabled="disabled" />
           <AccountWarmupCard
             v-model:enabled="form.accountWarmupEnabled"
-            v-model:schedule-time="form.accountWarmupScheduleTime"
+            v-model:cron="form.accountWarmupCron"
             v-model:model="form.accountWarmupModel"
           />
           <ResetCreditCard
             v-model="resetCreditLeadMinutesValue"
+            v-model:on-low-weekly-quota="form.resetCreditOnLowWeeklyQuota"
             v-model:max-weekly-remaining-percent="resetCreditMaxWeeklyRemainingPercentValue"
           />
           <RequestHistoryCard v-model="usageRetentionDaysValue" />
