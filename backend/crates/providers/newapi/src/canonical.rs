@@ -276,7 +276,7 @@ impl NewApiCanonicalDecoder {
         let usage = extract_usage(response);
         if let Some(usage) = usage {
             output.push(GatewayEvent::Usage(core_usage(usage)));
-            // 只有完整的纯 Token 用量才按同步价目本地计费
+            // 只有完整的纯 Token 用量才按生效价目本地计费
             if billable_usage_is_complete(response, usage)
                 && usage.image_input_tokens == 0
                 && usage.image_output_tokens == 0
@@ -354,7 +354,7 @@ impl NewApiCanonicalDecoder {
     }
 }
 
-/// 按 `standard` 档同步价或人工价计算费用；没有价目时不估价
+/// 按生效的 `standard` 档价格估算费用，缺少价目时不估算
 #[must_use]
 pub fn billing_breakdown(
     input_tokens: u64,

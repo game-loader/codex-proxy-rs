@@ -156,11 +156,13 @@ impl NewApiProvider {
             return Err(not_sent(ProviderErrorKind::Unsupported));
         };
         let body = request_body(&generate, upstream_model.as_str())?;
-        let pricing = context
-            .pricing()
-            .get(PROVIDER_NAME)
-            .and_then(|models| models.get(upstream_model.as_str()))
-            .cloned();
+        let pricing = crate::pricing::effective_pricing(
+            upstream_model.as_str(),
+            context
+                .pricing()
+                .get(PROVIDER_NAME)
+                .and_then(|models| models.get(upstream_model.as_str())),
+        );
         let SelectedAccount {
             account_id,
             credential,

@@ -102,8 +102,12 @@ impl ProviderAdmin for NewApiAdminProvider {
             output_tokens,
             usage.cached_input_tokens.unwrap_or_default(),
             usage.cache_write_input_tokens.unwrap_or_default(),
-            pricing,
+            crate::pricing::effective_pricing(&input.upstream_model_id, pricing).as_ref(),
         ))
+    }
+
+    fn pricing_catalog(&self) -> gateway_admin::model::pricing::ProviderPricingCatalog {
+        crate::pricing::pricing_catalog()
     }
 
     async fn account_unavailable(&self, _account_id: &ProviderAccountId) {

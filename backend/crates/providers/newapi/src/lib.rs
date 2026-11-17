@@ -15,6 +15,7 @@ mod canonical;
 mod catalog;
 mod credential;
 mod http;
+mod pricing;
 mod provider;
 mod selector;
 

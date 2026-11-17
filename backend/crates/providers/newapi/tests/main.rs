@@ -2,5 +2,6 @@
 
 mod canonical;
 mod credential;
+mod pricing;
 mod provider;
 mod support;

@@ -2454,7 +2454,8 @@ xAI 不接受 `flex`、`long_flex`、`ultrafast`、`long_ultrafast`、`image`。
 `multiplierBps` 为 0～1000000 的整数，10000 表示 1 倍、0 表示本地估算为零，最大 100 倍。
 它作用于本地费用及对应明细，独立于服务档位；缺少计价依据的请求即使倍率为零仍然是费用未知
 
-`provider` 为内置 `openai` 或 `xai`，对应价目由 `GET` 返回的 `defaults` 提供。
+`provider` 为 `openai`、`xai` 或 `newapi`，对应内置价目由 `GET` 返回的 `defaults` 提供。
+`newapi` 内置中转同名 GPT 模型的 OpenAI 标准档价格和 Kimi 官方价格，只含 `standard` 档；其他模型需同步或人工配置
 `models` 为 1～500 个模型 ID，每个 ID 为
 1～128 字节且不含空白、控制字符。`change` 为以下形式之一：
 
@@ -3050,7 +3051,7 @@ OAuth 字段依据 CPR 导出结构及官方 Codex `TokenData`，不按 `token /
 
 ### 费用与服务档位
 
-OpenAI 与 xAI 的本地费用估算按实际发送给上游的请求模型（`upstreamModel`）查价，结合响应中的实际
+OpenAI、xAI 与 newapi 的本地费用估算按实际发送给上游的请求模型（`upstreamModel`）查价，结合响应中的实际
 用量计算；客户端请求 A、路由后发送 B 时按 B 计价，响应返回 C 不改变计价模型。实际发送模型缺少
 定价时不估算，也不借用响应模型的价格。Provider 明确上报的已计费金额仍优先于本地估算
 
