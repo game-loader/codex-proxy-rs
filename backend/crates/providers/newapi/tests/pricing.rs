@@ -63,6 +63,12 @@ fn unconfigured_models_use_builtin_prices() {
         Some("2.58")
     );
     assert_eq!(total(admin.as_ref(), "unknown-model", None), None);
+    for (model, expected) in [("gpt-6.2-astra", "5.16"), ("gpt-6.2-sol", "1.29")] {
+        assert_eq!(
+            total(admin.as_ref(), model, None).as_deref(),
+            Some(expected)
+        );
+    }
 }
 
 #[test]
