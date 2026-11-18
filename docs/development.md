@@ -58,6 +58,18 @@ pnpm --dir frontend dev
 
 前后端检查见 [贡献与审查](../CONTRIBUTING.md#验证)，数据库集成测试使用[专用测试库](../backend/migrations/README.md#本地测试库)
 
+### Fork 分支镜像
+
+`game-loader/codex-proxy-rs` 的 `feat/feishu-login` 分支由 [Branch image](../.github/workflows/branch-image.yml) 在推送时从源码构建 Linux amd64 镜像并发布到 GHCR。分支标签为 `feat-feishu-login`，也可用 `sha-<完整提交 SHA>` 拉取指定提交。首次发布后，在 GHCR 包设置中将可见性改为 Public 即可匿名拉取；公开后不能再改回私有，见 [GitHub 包可见性说明](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
+
+沿用现有部署配置时，在安装目录用 `CPR_IMAGE` 指定分支镜像：
+
+```bash
+export CPR_IMAGE=ghcr.io/game-loader/codex-proxy-rs:feat-feishu-login
+docker compose -f deploy/compose.yaml pull codex-proxy-rs
+docker compose -f deploy/compose.yaml up -d --no-build --wait codex-proxy-rs
+```
+
 ## 源码入口
 
 后端职责和依赖方向见 [Workspace 边界](architecture.md#3-workspace-边界)，页面与共享逻辑见 [前端模块职责](architecture.md#34-前端模块职责)。

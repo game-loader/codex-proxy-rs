@@ -1,0 +1,103 @@
+name: Branch image
+
+on:
+  push:
+    branches:
+      - feat/feishu-login
+
+permissions: {}
+
+concurrency:
+  group: feishu-branch-image
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.repository == 'game-loader/codex-proxy-rs' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    env:
+      TRIVY_QUIET: 'true'
+      TRIVY_SKIP_VERSION_CHECK: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Read build version
+        id: version
+        run: |
+          version="$(ruby -ryaml -e 'puts YAML.load_file("release/version.yaml").fetch("version")')"
+          test -n "$version"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build source image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          load: true
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          build-args: |
+            CPR_VERSION=${{ steps.version.outputs.version }}
+            CPR_GIT_SHA=${{ github.sha }}
+            CPR_BUILD_TYPE=source
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          no-cache-filters: |
+            runtime-base
+            runtime
+          cache-from: type=gha,scope=feishu-branch-image
+          cache-to: type=gha,mode=max,scope=feishu-branch-image,ignore-error=true
+
+      - name: Check executable and frontend assets
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY}:sha-${GITHUB_SHA}"
+          version="$(docker run --rm "$image" /app/bin/codex-proxy-rs --version)"
+          test "$version" = "$EXPECTED_VERSION"
+          docker run --rm "$image" test -s /app/web/dist/index.html
+
+      - name: Verify runtime image
+        uses: ./.github/actions/verify-container
+        with:
+          image: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          platform: linux/amd64
+          artifact-name: container-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+
+      - name: Login to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish image tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha_image="ghcr.io/${GITHUB_REPOSITORY}:sha-${GITHUB_SHA}"
+          docker push "$sha_image"
+          printf "Image: %s\n" "$sha_image" >> "$GITHUB_STEP_SUMMARY"
+
+          # 旧任务重跑时保留提交标签，避免把分支标签回退到旧提交
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')
+          if [[ "$tip" == "$GITHUB_SHA" ]]; then
+            branch_image="ghcr.io/${GITHUB_REPOSITORY}:feat-feishu-login"
+            docker tag "$sha_image" "$branch_image"
+            docker push "$branch_image"
+            printf "Branch image: %s\n" "$branch_image" >> "$GITHUB_STEP_SUMMARY"
+          fi
