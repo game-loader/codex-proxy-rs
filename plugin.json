@@ -1,0 +1,70 @@
+{
+  "manifestVersion": 2,
+  "publisher": "game-loader",
+  "name": "key-usage-ranking",
+  "displayName": "Key 用量排行",
+  "version": "0.1.0",
+  "description": "按日、周或月查看各 Key 的已知美元费用和用量",
+  "license": "Apache-2.0",
+  "engines": {
+    "codex-proxy-rs": ">=3.50.0, <3.51.0"
+  },
+  "main": "bin/plugin",
+  "runtime": "trustedProcess",
+  "contributes": {
+    "management": {
+      "version": 2
+    },
+    "maintenance": {
+      "version": 1
+    }
+  },
+  "configurationSchema": {
+    "type": "object",
+    "properties": {
+      "timezone": {
+        "type": "string",
+        "title": "部署时区",
+        "description": "填写与宿主 host.timezone 相同的 IANA 时区",
+        "default": "Asia/Shanghai",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "additionalProperties": false
+  },
+  "resources": {
+    "web/index.html": "text/html",
+    "web/app.js": "text/javascript",
+    "web/app.css": "text/css"
+  },
+  "state": [
+    {
+      "namespace": "monthly-ranking",
+      "schemaVersion": 1,
+      "schema": {
+        "type": "object",
+        "required": [
+          "start_ms",
+          "end_ms",
+          "rows"
+        ],
+        "properties": {
+          "start_ms": {
+            "type": "integer"
+          },
+          "end_ms": {
+            "type": "integer"
+          },
+          "rows": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "maximumRecords": 10000,
+      "maximumBytes": 16777216,
+      "maximumValueBytes": 262144
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+html,
+body,
+#app {
+  height: auto;
+  min-width: 0;
+}
+
+body {
+  margin: 0;
+  background: transparent;
+}
+
+#app {
+  min-height: inherit;
+}

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+target=x86_64-unknown-linux-gnu
+pnpm --dir frontend install --frozen-lockfile
+pnpm --dir frontend build
+cargo build --locked --release --target "$target" --manifest-path backend/Cargo.toml
+target_dir=$(cargo metadata --locked --manifest-path backend/Cargo.toml --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+"${PLUGIN_CLI:-cpr-plugin}" package --manifest plugin.json --binary "$target_dir/$target/release/cpr-key-usage-ranking" --target "$target" --resource-map web=frontend/dist --output-dir dist

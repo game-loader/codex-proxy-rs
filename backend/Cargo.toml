@@ -1,0 +1,30 @@
+[package]
+name = "cpr-key-usage-ranking"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["now"] }
+chrono-tz = "0.10.4"
+gateway-plugin-sdk = { git = "https://github.com/game-loader/codex-proxy-rs.git", rev = "15af669f4ae112743e902cd3edadf730cdeb5b50", features = ["io"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+serde_urlencoded = "0.7.1"
+tokio = { version = "1.52.3", default-features = false, features = ["io-std", "macros", "rt"] }
+
+[lints.rust]
+warnings = "deny"
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+redundant_clone = "deny"
+needless_collect = "deny"
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1

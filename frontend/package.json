@@ -1,0 +1,29 @@
+{
+  "name": "cpr-key-usage-ranking-frontend",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "vue-tsc --noEmit && vite build",
+    "lint": "eslint .",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@codex-proxy/ui": "github:zyycn/codex-proxy-ui#68458e62e7fb9fadbacea75ce48522f2ba85b8b2",
+    "vue": "3.5.45"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "10.0.0",
+    "@types/node": "26.6.6",
+    "@vitejs/plugin-vue": "6.0.11",
+    "eslint": "10.15.0",
+    "eslint-plugin-vuejs-accessibility": "2.6.3",
+    "typescript": "6.0.3",
+    "vite": "8.3.8",
+    "vue-tsc": "3.3.14"
+  }
+}
