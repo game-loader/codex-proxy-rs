@@ -4,6 +4,7 @@ import { Search } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import ApiKeyConfigModal from '@/components/ApiKeyConfigModal.vue'
 import RequestHealthTimelineCard from '@/components/usage/RequestHealthTimelineCard.vue'
+import UsageModelCosts from '@/components/usage/UsageModelCosts.vue'
 import KeyUsageBudget from './components/KeyUsageBudget.vue'
 import KeyUsageHeader from './components/KeyUsageHeader.vue'
 import KeyUsageRecords from './components/KeyUsageRecords.vue'
@@ -15,7 +16,22 @@ import { useKeyUsage } from './composables/useKeyUsage'
 
 const { t } = useI18n({ useScope: 'global' })
 
-const { period, model, kind, refreshInterval, overview, overviewLoading, refreshing, records, refresh, changePageSize, changePage } = useKeyUsage()
+const {
+  period,
+  model,
+  kind,
+  refreshInterval,
+  overview,
+  overviewLoading,
+  modelCosts,
+  modelCostsLoading,
+  modelCostsError,
+  refreshing,
+  records,
+  refresh,
+  changePageSize,
+  changePage,
+} = useKeyUsage()
 const { items, currentPage, pageSize, total, loading: recordsLoading } = records
 const { showConfig, configKey, configuring, apiBaseUrl, openConfig, copyConfig } = useKeyConfig()
 </script>
@@ -44,6 +60,7 @@ const { showConfig, configKey, configuring, apiBaseUrl, openConfig, copyConfig }
           <RequestHealthTimelineCard :timeline="overview.healthTimeline" />
         </template>
         <KeyUsageSkeleton v-else-if="overviewLoading" />
+        <UsageModelCosts :result="modelCosts" :loading="modelCostsLoading" :error="modelCostsError" />
         <KeyUsageRecords v-model:kind="kind" :rows="items" :pagination="{ currentPage, pageSize, total }" :loading="recordsLoading" @page-change="changePage" @page-size-change="changePageSize" />
       </div>
     </ZScrollbar>

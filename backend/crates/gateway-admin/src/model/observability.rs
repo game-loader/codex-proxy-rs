@@ -263,11 +263,26 @@ pub struct OpsErrorQuery {
 pub enum DiagnosticDimension {
     Provider,
     Model,
+    RequestedModel,
     Account,
     ApiKey,
     Transport,
     Failure,
     Status,
+}
+
+/// 按客户端请求模型汇总单个 Key 已记录的 USD 费用
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyModelCosts {
+    pub items: Vec<ModelCost>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelCost {
+    pub model: Option<String>,
+    pub cost_usd: Option<DecimalAmount>,
+    pub cost_incomplete: bool,
 }
 
 /// `numeric(20,10)` 的非负规范金额

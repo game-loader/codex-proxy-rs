@@ -112,7 +112,7 @@ async fn usage_summary_preserves_counts_latency_samples_and_costs_across_read_pa
         ),
     ] {
         seed(&database.pool, id, start + TimeDelta::minutes(minute), &[]).await;
-        sqlx::query("update model_requests set provider_kind=$2,provider_account_ref='account_summary',client_api_key_ref=$3,upstream_transport='http_sse',attempt_count=1,upstream_send_state='sent',outcome=$4,client_status_code=case when $4='cancelled' then 499 else 200 end,cost_source=case when $5::text is null then 'unavailable' else 'provider_reported' end,cost_currency=$5,cost_amount=$6::text::numeric,request_observation_json=jsonb_set(request_observation_json,'{timings,local}',jsonb_strip_nulls(jsonb_build_object('latencyMs',$7::bigint))) where id=$1")
+        sqlx::query("update model_requests set provider_kind=$2,provider_account_ref='account_summary',client_api_key_ref=$3,upstream_model_id=$1,upstream_transport='http_sse',attempt_count=1,upstream_send_state='sent',outcome=$4,client_status_code=case when $4='cancelled' then 499 else 200 end,cost_source=case when $5::text is null then 'unavailable' else 'provider_reported' end,cost_currency=$5,cost_amount=$6::text::numeric,request_observation_json=jsonb_set(request_observation_json,'{timings,local}',jsonb_strip_nulls(jsonb_build_object('latencyMs',$7::bigint))) where id=$1")
             .bind(id).bind(provider).bind(key).bind(outcome).bind(currency).bind(amount).bind(latency)
             .execute(&database.pool).await.unwrap();
     }
@@ -142,7 +142,7 @@ async fn usage_summary_preserves_counts_latency_samples_and_costs_across_read_pa
         let overview = repo
             .usage_insights_observation(
                 range,
-                filter,
+                filter.clone(),
                 gateway_admin::model::observability::Granularity::Hour,
                 true,
             )
@@ -180,6 +180,17 @@ async fn usage_summary_preserves_counts_latency_samples_and_costs_across_read_pa
             vec![("CNY", "2.5"), ("USD", "1.25")]
         );
         assert_eq!(summary.analytics.percentiles_approximate, approximate);
+        let groups = repo
+            .usage_diagnostics(range, filter, DiagnosticDimension::RequestedModel, 100)
+            .await
+            .unwrap();
+        let [model] = groups.items.as_slice() else {
+            panic!("expected one client model across distinct upstream models");
+        };
+        assert_eq!(model.key, "model_a");
+        assert_eq!(model.request_count, 5);
+        assert_eq!(model.costs, summary.attempts.costs);
+        assert_eq!(model.cost_coverage.unavailable_count, 1);
     }
     let empty = repo
         .usage_summary(

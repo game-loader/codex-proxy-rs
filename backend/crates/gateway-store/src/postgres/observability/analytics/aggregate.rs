@@ -461,6 +461,7 @@ pub(super) fn fact_dimension_sql(dimension: Option<DiagnosticDimension>) -> &'st
         Some(DiagnosticDimension::Model) => {
             "coalesce(nullif(mr.upstream_model_id,''),mr.requested_model_id,'')"
         }
+        Some(DiagnosticDimension::RequestedModel) => "coalesce(mr.requested_model_id,'')",
         Some(DiagnosticDimension::Account) => {
             "coalesce(nullif(mr.provider_account_ref,''),'unrouted')"
         }
@@ -490,6 +491,9 @@ pub(super) fn summary_dimension_sql(
             3 + offset,
             2 + offset
         ),
+        Some(DiagnosticDimension::RequestedModel) => {
+            format!("coalesce(dimensions[{}],'')", 2 + offset)
+        }
         Some(DiagnosticDimension::Account) => {
             "coalesce(nullif(dimensions[1],''),'unrouted')".to_owned()
         }

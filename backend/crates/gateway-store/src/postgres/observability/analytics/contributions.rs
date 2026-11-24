@@ -42,7 +42,12 @@ impl AnalyticsSnapshot<'_> {
             || filter.provider_account_name.is_some()
             || matches!(
                 dimension,
-                Some(DiagnosticDimension::Failure | DiagnosticDimension::Status)
+                Some(
+                    DiagnosticDimension::Failure
+                        | DiagnosticDimension::Status
+                        // 外部贡献只保存上游模型，不能作为客户端请求模型展示
+                        | DiagnosticDimension::RequestedModel
+                )
             )
         {
             return Ok(());

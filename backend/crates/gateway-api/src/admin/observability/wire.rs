@@ -2,6 +2,36 @@
 
 use super::*;
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KeyModelCostsView {
+    items: Vec<ModelCostView>,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelCostView {
+    model: Option<String>,
+    cost_usd: Option<String>,
+    cost_incomplete: bool,
+}
+
+pub(crate) fn key_model_costs_view(value: domain::KeyModelCosts) -> KeyModelCostsView {
+    KeyModelCostsView {
+        items: value
+            .items
+            .into_iter()
+            .map(|item| ModelCostView {
+                model: item.model,
+                cost_usd: item.cost_usd.map(|amount| amount.as_str().to_owned()),
+                cost_incomplete: item.cost_incomplete,
+            })
+            .collect(),
+        truncated: value.truncated,
+    }
+}
+
 /// 观测列表响应数据
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

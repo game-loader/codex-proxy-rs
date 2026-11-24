@@ -392,7 +392,7 @@ async fn missing_admin_and_revoked_sessions_cannot_read_key_usage() {
     let app = crate::openai::api_router_with_admin(fixture.services.clone());
     let admin = login(&app, "admin").await;
     let key = login(&app, "key").await;
-    for resource in ["overview", "records", "config", "version"] {
+    for resource in ["overview", "model-costs", "records", "config", "version"] {
         assert_eq!(
             get(&app, resource, "", "").await.status(),
             StatusCode::UNAUTHORIZED
@@ -416,9 +416,10 @@ async fn unknown_scope_fields_and_unbounded_queries_are_rejected() {
     let fixture = fixtures::fixture().await;
     let app = crate::openai::api_router_with_admin(fixture.services.clone());
     let cookie = login(&app, "key").await;
-    for resource in ["overview", "records"] {
+    for resource in ["overview", "model-costs", "records"] {
         for extra in [
             "&clientApiKeyRef=other",
+            "&clientApiKeyId=other",
             "&keyId=other",
             "&account=other",
             "&provider=openai",

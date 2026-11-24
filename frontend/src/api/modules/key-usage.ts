@@ -1,7 +1,7 @@
 import type { RequestOptions } from '../request'
 import type { AnalyticsMetadata } from './analytics'
 import type { DashboardHealthTimeline } from './dashboard'
-import type { UsageBilling, UsageLatencyDetails, UsageTokenDetails } from './usage'
+import type { KeyModelCosts, UsageBilling, UsageLatencyDetails, UsageTokenDetails } from './usage'
 import request from '../request'
 
 export interface KeyUsageConfig {
@@ -98,6 +98,15 @@ interface KeyUsageRecordsQuery extends KeyUsageQuery {
 export function getKeyUsageOverview(data: KeyUsageQuery, options: RequestOptions = {}) {
   return request<KeyUsageOverview>({
     url: '/api/key-usage/overview',
+    method: 'GET',
+    params: data,
+    ...options,
+  })
+}
+
+export function getKeyUsageModelCosts(data: KeyUsageQuery, options: RequestOptions = {}) {
+  return request<KeyModelCosts>({
+    url: '/api/key-usage/model-costs',
     method: 'GET',
     params: data,
     ...options,

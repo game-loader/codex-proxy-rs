@@ -31,6 +31,10 @@ where
         )
         .route("/api/admin/usage/insights/cost", get(usage_cost::<S>))
         .route(
+            "/api/admin/usage/insights/model-costs",
+            get(key_model_costs::<S>),
+        )
+        .route(
             "/api/admin/usage/insights/diagnostics",
             get(usage_insights_diagnostics::<S>),
         )
@@ -246,6 +250,36 @@ where
 {
     let (range, metric) = query.into_parts();
     usage_metric_response(state, range, metric.into()).await
+}
+
+async fn key_model_costs<S>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+    AdminQuery(query): AdminQuery<KeyModelCostsQuery>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let key = gateway_core::policy::ClientApiKeyId::new(query.client_api_key_id.trim())
+        .map_err(|_| AdminError::bad_request("clientApiKeyId 不合法"))?;
+    let range = usage_range(
+        query.start_time.as_deref(),
+        query.end_time.as_deref(),
+        query.period.as_deref(),
+        query.as_of,
+        state.admin_services().timezone(),
+    )
+    .map_err(map_wire_error)?;
+    let result = state
+        .admin_services()
+        .observability()
+        .key_model_costs(&key, range, non_empty(query.provider))
+        .await
+        .map_err(map_service_error)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(key_model_costs_view(result)),
+    ))
 }
 
 async fn usage_metric_response<S>(

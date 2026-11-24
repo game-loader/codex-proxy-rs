@@ -1,4 +1,4 @@
-//! 测试辅助：只读账号仓库，以及目录对账不会调用的端口占位实现
+//! 测试辅助：只读账号仓库、空闲调度租约与未使用端口的占位实现
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,11 +6,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use gateway_core::account::{
-    AccountCatalogObservation, AccountStateChange, CredentialCasOutcome, CredentialCasUpdate,
-    CredentialRevision, LoadedCredential, NewProviderAccount, OpaqueProviderData,
-    PlaintextCredential, ProviderAccount, ProviderAccountId, ProviderAccountStore,
-    ProviderAccountUpdate, ProviderRefreshQuery, QuotaAccessChange, QuotaObservation,
-    QuotaObservationTouch, QuotaWriteOutcome, StoredAccountCatalog,
+    AccountCatalogObservation, AccountRuntimeSignals, AccountStateChange, CredentialCasOutcome,
+    CredentialCasUpdate, CredentialRevision, CredentialState, LoadedCredential, NewProviderAccount,
+    OpaqueProviderData, PlaintextCredential, ProviderAccount, ProviderAccountId,
+    ProviderAccountStore, ProviderAccountUpdate, ProviderRefreshQuery, QuotaAccessChange,
+    QuotaObservation, QuotaObservationTouch, QuotaState, QuotaWriteOutcome, StoredAccountCatalog,
 };
 use gateway_core::diagnostics::{OperationalDiagnostics, OperationalFailure};
 use gateway_core::error::{StoreError, StoreErrorKind};
@@ -34,7 +34,7 @@ use provider_newapi::{AUTHENTICATION_KIND, NewApiCredential, PROVIDER_NAME};
 pub fn ports_with_account(id: &str, base_url: &str) -> ProviderStorePorts {
     ProviderStorePorts::new(
         Arc::new(StaticAccounts::single(id, base_url)),
-        Arc::new(Unused),
+        Arc::new(IdleLeases),
         Arc::new(Unused),
         Arc::new(Unused),
         Arc::new(Unused),
@@ -62,6 +62,13 @@ impl StaticAccounts {
             None,
             AUTHENTICATION_KIND.to_owned(),
             CredentialRevision::new(1).unwrap(),
+            None,
+        )
+        .with_account_facts(
+            true,
+            CredentialState::Ready,
+            QuotaState::unknown(),
+            None,
             None,
         );
         let credential = NewApiCredential::new(base_url, "sk-test").unwrap();
@@ -228,22 +235,45 @@ fn unused_future<'a, T: Send + 'a>() -> BoxFuture<'a, Result<T, ProviderStoreErr
     Box::pin(async { Err(port_unused()) })
 }
 
-impl ProviderLeasePort for Unused {
+struct IdleLeases;
+
+impl ProviderLeasePort for IdleLeases {
     fn load_state<'a>(
         &'a self,
         _: &'a ClientApiKeyId,
         _: &'a ProviderKind,
-        _: &'a [ProviderAccountId],
+        accounts: &'a [ProviderAccountId],
         _: ProviderConcurrencyPool,
     ) -> BoxFuture<'a, Result<ProviderSchedulingState, ProviderStoreError>> {
-        unused_future()
+        Box::pin(async move {
+            let signals = accounts
+                .iter()
+                .cloned()
+                .map(|account| {
+                    (
+                        account,
+                        AccountRuntimeSignals {
+                            in_flight: 0,
+                            last_started_at: None,
+                            quota_reset_at: None,
+                            quota_reset_windows: None,
+                            quota_remaining_rank: None,
+                            cooldown: None,
+                            failure_rate_basis_points: None,
+                            first_output_latency_ms: None,
+                        },
+                    )
+                })
+                .collect();
+            Ok(ProviderSchedulingState::new(signals, 0))
+        })
     }
 
     fn try_acquire(
         &self,
         _: ProviderLeaseRequest,
     ) -> BoxFuture<'_, Result<ProviderLeaseAcquisition, ProviderStoreError>> {
-        unused_future()
+        Box::pin(async { Ok(ProviderLeaseAcquisition::Acquired(Box::new(()))) })
     }
 }
 

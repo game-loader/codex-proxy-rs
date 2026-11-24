@@ -590,7 +590,11 @@ impl<'a> AnalyticsSnapshot<'a> {
                 None,
                 Default::default(),
                 ReadSelection {
-                    distributions: DistributionRead::Full,
+                    distributions: if dimension == DiagnosticDimension::RequestedModel {
+                        DistributionRead::None
+                    } else {
+                        DistributionRead::Full
+                    },
                     costs: true,
                     keys: selected_keys,
                     counters: Some(&[
@@ -1260,7 +1264,9 @@ pub(super) fn collection_for(
     }
     if let Some(dimension) = dimension {
         required.insert(match dimension {
-            DiagnosticDimension::Provider | DiagnosticDimension::Model => "provider_model",
+            DiagnosticDimension::Provider
+            | DiagnosticDimension::Model
+            | DiagnosticDimension::RequestedModel => "provider_model",
             DiagnosticDimension::Account => "account",
             DiagnosticDimension::ApiKey => "key",
             DiagnosticDimension::Transport => "transport",

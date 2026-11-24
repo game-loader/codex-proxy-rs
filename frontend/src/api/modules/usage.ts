@@ -411,6 +411,17 @@ export interface UsageDiagnosticsResponse {
   items: UsageDiagnosticItem[]
 }
 
+export interface ModelCost {
+  model: string | null
+  costUsd: string | null
+  costIncomplete: boolean
+}
+
+export interface KeyModelCosts {
+  items: ModelCost[]
+  truncated: boolean
+}
+
 // 请求参数类型：仅定义 API 边界的形状，调用方不依赖显式声明。
 interface UsageRangeQuery {
   startTime: string
@@ -504,6 +515,15 @@ export function getUsagePerformance<M extends UsagePerformanceMetric>(data: Usag
 export function getUsageCost<M extends UsageCostMetric>(data: UsageRangeQuery & { metric: M }, options: RequestOptions = {}) {
   return request<UsageMetricResponse<M>>({
     url: '/api/admin/usage/insights/cost',
+    method: 'GET',
+    params: data,
+    ...options,
+  })
+}
+
+export function getAdminKeyModelCosts(data: UsageRangeQuery & { clientApiKeyId: string }, options: RequestOptions = {}) {
+  return request<KeyModelCosts>({
+    url: '/api/admin/usage/insights/model-costs',
     method: 'GET',
     params: data,
     ...options,

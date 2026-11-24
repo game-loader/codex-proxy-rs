@@ -11,6 +11,7 @@ import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
 import UsageRecordStatusFilter from '@/components/usage/UsageRecordStatusFilter.vue'
+import AdminKeyModelCosts from './components/AdminKeyModelCosts.vue'
 import UsageErrorDetailModal from './components/UsageErrorDetailModal.vue'
 import UsageFilters from './components/UsageFilters.vue'
 import UsageInsightsGrid from './components/UsageInsightsGrid.vue'
@@ -113,6 +114,8 @@ watch(timeRange, () => {
       :cost="cost"
       :diagnostics="diagnostics"
     />
+
+    <AdminKeyModelCosts class="mt-5" :range="timeRangeParams" :provider="providerQuery" />
 
     <ZCard
       class="mt-5 flex flex-col"

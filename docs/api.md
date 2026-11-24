@@ -1189,11 +1189,12 @@ call 与账号的绑定保存在网关进程内，未连接时一小时过期；
 | 方法 | 路由 | 查询 | 说明 |
 | --- | --- | --- | --- |
 | `GET` | `/api/key-usage/overview` | `period?`、`asOf?` 或 `startTime?`、`endTime?`，另含 `model?` | 用量汇总、趋势、当前额度和锚点所在日期的健康时间线 |
+| `GET` | `/api/key-usage/model-costs` | 同上 | 当前 Key 的[模型费用](#模型费用)，范围取自会话 |
 | `GET` | `/api/key-usage/records` | 同上，另含 `kind?`、`currentPage?`、`pageSize?` | 当前 Key 的请求记录 |
 | `GET` | `/api/key-usage/config` | 无 | 当前 Key 的客户端配置凭据 |
 | `GET` | `/api/key-usage/version` | 无 | “关于”弹窗使用的当前版本号和提交号 |
 
-用量查询支持[页面时间合同](#页面时间合同)，默认 `period=7d`，一次最多 31 天。模型按字面量包含匹配，区分大小写，通配符按普通字符处理
+用量查询支持[页面时间合同](#页面时间合同)，默认 `period=today`，一次最多 31 天。模型按字面量包含匹配，区分大小写，通配符按普通字符处理
 不接受 Key ID、账号、Provider 等范围参数或其他未知字段。页码默认 1，每页默认 20，允许 1–100 条；
 `kind` 为 `success`（默认）、`error` 或 `all`，沿用使用统计的请求结果筛选：错误包括失败和未完成请求，
 全部还包括取消与进行中的请求；一次请求只占一条记录。分页响应为 `{ items, currentPage, pageSize, total }`
@@ -2456,7 +2457,14 @@ xAI 不接受 `flex`、`long_flex`、`ultrafast`、`long_ultrafast`、`image`。
 它作用于本地费用及对应明细，独立于服务档位；缺少计价依据的请求即使倍率为零仍然是费用未知
 
 `provider` 为 `openai`、`xai` 或 `newapi`，对应内置价目由 `GET` 返回的 `defaults` 提供。
-`newapi` 内置中转同名 GPT 模型的 OpenAI 标准档价格和 Kimi 官方价格，只含 `standard` 档；其他模型需同步或人工配置
+`newapi` 只使用 `standard` 档。内置价包括同名 GPT 模型的 OpenAI 标准档、Kimi 官方价、
+[Z.ai 国际站 GLM‑5.3 价](https://docs.z.ai/guides/overview/pricing)及
+[DeepSeek Flash 的 USD 高峰价](https://api-docs.deepseek.com/quick_start/pricing/)，含官方旧 ID
+`deepseek-v4-flash` 和 `deepseek-v4-flash-vision-exp`。GLM‑5.3 和 DeepSeek Flash 的缓存写入 Token 按未命中输入价计
+
+DeepSeek 直连的高峰为北京时间周一至周五 09:00–12:00、14:00–18:00，中国法定节假日全天、周末及其余时段为半价。
+中转费用固定使用高峰参考价估算。`glm-5.4` 暂按 GLM‑5.3 标准档作本地估算。管理员可按实际中转单价覆盖
+
 `models` 为 1～500 个模型 ID，每个 ID 为
 1～128 字节且不含空白、控制字符。`change` 为以下形式之一：
 
@@ -2763,6 +2771,7 @@ Dashboard 的当前账号摘要包含 `upstream`，结构与账号列表一致�
 | `GET` | `/api/admin/usage/insights/health` | 请求健康 |
 | `GET` | `/api/admin/usage/insights/performance` | 响应性能；`metric=latency\|firstToken\|throughput\|load` |
 | `GET` | `/api/admin/usage/insights/cost` | 成本效率；`metric=cost\|savings\|cache` |
+| `GET` | `/api/admin/usage/insights/model-costs` | 单个 Key 的[模型费用](#模型费用) |
 | `GET` | `/api/admin/usage/insights/diagnostics` | 按维度聚合诊断 |
 | `GET` | `/api/admin/operations/errors` | 运维错误分页列表 |
 | `GET` | `/api/admin/diagnostics/export` | 按 `requestId` 或 `errorId` 下载诊断 ZIP 附件 |
@@ -3050,11 +3059,25 @@ OAuth 字段依据 CPR 导出结构及官方 Codex `TokenData`，不按 `token /
 `upstreamSendState = ambiguous` 表示无法确认该次上游执行结果，不代表后续恢复请求失败；
 恢复关联也不等于逐字节验证过两次请求正文
 
+### 模型费用
+
+管理端需要传入精确的 `clientApiKeyId`，支持同页的时间范围和 `provider` 筛选。Key 自助接口使用会话绑定的 Key，
+沿用自助用量的时间范围与模型筛选。明细分页与状态筛选不影响模型费用
+
+两个接口均返回 `{ items, truncated }`。每项包含客户端请求的 `model`、已记录 USD 费用之和 `costUsd`，
+以及表示存在未知或不完整费用的 `costIncomplete`。未记录模型或 USD 费用时对应字段为 `null`，已记录的零费用返回 `"0"`。
+分组按请求量降序，最多返回 100 组，省略其他组时 `truncated` 为 `true`
+
+费用沿用[记录范围与统计口径](#记录范围与统计口径)，按请求开始时间取数，只累计完整交付的成功推理费用。
+外部汇总贡献没有客户端请求模型，因此不计入。相同的请求模型即使路由到不同上游模型也归为同组
+
 ### 费用与服务档位
 
 OpenAI、xAI 与 newapi 的本地费用估算按实际发送给上游的请求模型（`upstreamModel`）查价，结合响应中的实际
 用量计算；客户端请求 A、路由后发送 B 时按 B 计价，响应返回 C 不改变计价模型。实际发送模型缺少
 定价时不估算，也不借用响应模型的价格。Provider 明确上报的已计费金额仍优先于本地估算
+
+`newapi` 已知的本地估算随终态计入用量费用统计。用量缺失、不一致或包含另行计费的托管工具调用时，费用保持未知
 
 xAI 的 `cost_in_usd_ticks=0` 表示上游没有报告费用，不证明请求免费；正数才作为上游账单。
 未报告时，只有已知价格且能覆盖本次费用的请求才使用本地估算，未知价格或无法覆盖的托管工具费用保持未知。

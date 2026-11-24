@@ -31,6 +31,20 @@ const PRICING_RULES: &[(&[&str], Rates)] = &[
         ("4", "20", "0.2", "4"),
     ),
     (&["kimi-k3", "k3", "k3-256k"], ("3", "15", "0.3", "3")),
+    // Z.ai 国际站：https://docs.z.ai/guides/overview/pricing ，2026-11-24 核验
+    // 缓存存储限时免费，写入 Token 仍按未命中输入价计
+    // GLM-5.4 暂用 5.3 的本地估价，管理员可按中转商报价覆盖
+    (&["glm-5.3", "glm-5.4"], ("1.4", "4.4", "0.26", "1.4")),
+    // 来源：https://api-docs.deepseek.com/quick_start/pricing/ ，2026-11-24 核验
+    // 中转不提供官方折扣是否适用的依据，固定采用 USD 高峰参考价
+    (
+        &[
+            "deepseek-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-vision-exp",
+        ],
+        ("0.3", "1.2", "0.006", "0.3"),
+    ),
 ];
 
 fn price(value: &str) -> TokenPrice {

@@ -280,6 +280,13 @@ impl NewApiCanonicalDecoder {
             if billable_usage_is_complete(response, usage)
                 && usage.image_input_tokens == 0
                 && usage.image_output_tokens == 0
+                // DeepSeek Responses 的托管工具另按调用次数计费，Token 价目无法覆盖
+                && response.pointer("/usage/server_tool_use").is_none_or(|tools| {
+                    tools.is_null()
+                        || tools.as_object().is_some_and(|counts| {
+                            counts.values().all(|count| count.as_u64() == Some(0))
+                        })
+                })
                 && let Some(breakdown) = billing_breakdown(
                     usage.input_tokens,
                     usage.output_tokens,

@@ -14,7 +14,9 @@ use crate::{
             KeyUsageOverview, KeyUsageQuery, KeyUsageRecordKind, KeyUsageRecords,
             KeyUsageRecordsQuery,
         },
-        observability::{Granularity, TimeRange, UsageFilter, UsageQuery, UsageRecordStatus},
+        observability::{
+            Granularity, KeyModelCosts, TimeRange, UsageFilter, UsageQuery, UsageRecordStatus,
+        },
         system::SystemVersion,
     },
     ports::store::{ClientKeyStore, ObservabilityStore},
@@ -50,6 +52,12 @@ pub trait KeyUsageService: Send + Sync {
         session_id: Option<&str>,
         query: KeyUsageQuery,
     ) -> Result<Option<KeyUsageOverview>, AdminError>;
+
+    async fn model_costs(
+        &self,
+        session_id: Option<&str>,
+        query: KeyUsageQuery,
+    ) -> Result<Option<KeyModelCosts>, AdminError>;
 
     async fn records(
         &self,
@@ -210,6 +218,25 @@ impl KeyUsageService for DefaultKeyUsageService {
             trend: observation.trend,
             health_timeline: health_timeline_at(&health_points, now, self.timezone)?,
         }))
+    }
+
+    async fn model_costs(
+        &self,
+        session_id: Option<&str>,
+        query: KeyUsageQuery,
+    ) -> Result<Option<KeyModelCosts>, AdminError> {
+        let Some(id) = self.key_id(session_id).await? else {
+            return Ok(None);
+        };
+        super::observability::key_model_costs(
+            self.observations.as_ref(),
+            &id,
+            query.range,
+            query.model,
+            None,
+        )
+        .await
+        .map(Some)
     }
 
     async fn records(

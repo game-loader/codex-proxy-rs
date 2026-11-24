@@ -727,6 +727,7 @@ pub(crate) fn push_diagnostic_dimension_filter(
                 .push(" and coalesce(mr.upstream_status_code, mr.client_status_code) is not null");
         }
         DiagnosticDimension::Provider
+        | DiagnosticDimension::RequestedModel
         | DiagnosticDimension::Account
         | DiagnosticDimension::ApiKey
         | DiagnosticDimension::Transport => {}

@@ -10,7 +10,10 @@ use axum::{
 };
 
 use crate::{
-    admin::{AdminEnvelope, AdminError, AdminQuery, AdminResponse, wire::map_admin_service_error},
+    admin::{
+        AdminEnvelope, AdminError, AdminQuery, AdminResponse, observability::key_model_costs_view,
+        wire::map_admin_service_error,
+    },
     auth::SessionState,
     session_cookie,
 };
@@ -26,6 +29,7 @@ where
         .route("/api/key-usage/version", get(version::<S>))
         .route("/api/key-usage/config", get(config::<S>))
         .route("/api/key-usage/overview", get(overview::<S>))
+        .route("/api/key-usage/model-costs", get(model_costs::<S>))
         .route("/api/key-usage/records", get(records::<S>))
         .route("/api/key-usage", any(not_found))
         .route("/api/key-usage/{*path}", any(not_found))
@@ -97,6 +101,30 @@ where
     Ok(AdminResponse::new(
         StatusCode::OK,
         AdminEnvelope::ok(presenter::overview(overview, time)),
+    ))
+}
+
+async fn model_costs<S>(
+    State(state): State<S>,
+    headers: HeaderMap,
+    AdminQuery(query): AdminQuery<query::OverviewQuery>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let result = state
+        .admin_services()
+        .key_usage()
+        .model_costs(
+            session_cookie::value(&headers).as_deref(),
+            query.into_domain(state.admin_services().timezone())?,
+        )
+        .await
+        .map_err(map_admin_service_error)?
+        .ok_or_else(AdminError::session_required)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(key_model_costs_view(result)),
     ))
 }
 

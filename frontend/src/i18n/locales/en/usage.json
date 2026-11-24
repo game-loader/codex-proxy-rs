@@ -241,6 +241,14 @@
       "errors": "Errors: {count}",
       "errorRate": "Error rate: {rate}"
     },
+    "modelCosts": {
+      "title": "Cost by model",
+      "selectKey": "Select an API key",
+      "noKeys": "No API keys",
+      "empty": "No model usage in this range",
+      "partial": "Partial",
+      "truncated": "Showing the 100 models with the most requests"
+    },
     "cost": {
       "savings": "Savings",
       "cache": "Cache",

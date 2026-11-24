@@ -9,7 +9,7 @@ use std::{
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use futures::StreamExt as _;
-use gateway_core::{account::ProviderAccountId, routing::ProviderKind};
+use gateway_core::{account::ProviderAccountId, policy::ClientApiKeyId, routing::ProviderKind};
 
 use crate::{
     model::{
@@ -18,16 +18,16 @@ use crate::{
             CostCoverage, CurrencyCost, DashboardAccountUsage, DashboardCapacity,
             DashboardPeriodMetrics, DashboardQuery, DashboardResult, DecimalAmount,
             DiagnosticDimension, DiagnosticsItem, DiagnosticsResult, Granularity, HealthStatus,
-            HealthTimeline, HealthTimelinePoint, OpsErrorPage, OpsErrorQuery, ProviderBillingInput,
-            RequestHealth, RequestMetricPoint, RequestMetrics, TimeRange, Trend, TrendKind,
-            TrendPoint, TrendSummary, UsageBilling, UsageBillingProjection, UsageCacheEfficiency,
-            UsageCalculatedBillingFact, UsageConcurrencyPoint, UsageCostComparison,
-            UsageCostSummary, UsageDetail, UsageFilter, UsageInsight, UsageInsightData,
-            UsageInsightMetric, UsageInsights, UsageInsightsCost, UsageInsightsCostPoint,
-            UsageInsightsHealth, UsageInsightsHealthPoint, UsageInsightsLoad,
-            UsageInsightsObservation, UsageInsightsPerformance, UsageInsightsPerformancePoint,
-            UsageMetricPoint, UsageMetricSeries, UsageOverview, UsagePage, UsageQuery,
-            UsageSummary, UsageThroughputPercentiles,
+            HealthTimeline, HealthTimelinePoint, KeyModelCosts, ModelCost, OpsErrorPage,
+            OpsErrorQuery, ProviderBillingInput, RequestHealth, RequestMetricPoint, RequestMetrics,
+            TimeRange, Trend, TrendKind, TrendPoint, TrendSummary, UsageBilling,
+            UsageBillingProjection, UsageCacheEfficiency, UsageCalculatedBillingFact,
+            UsageConcurrencyPoint, UsageCostComparison, UsageCostSummary, UsageDetail, UsageFilter,
+            UsageInsight, UsageInsightData, UsageInsightMetric, UsageInsights, UsageInsightsCost,
+            UsageInsightsCostPoint, UsageInsightsHealth, UsageInsightsHealthPoint,
+            UsageInsightsLoad, UsageInsightsObservation, UsageInsightsPerformance,
+            UsageInsightsPerformancePoint, UsageMetricPoint, UsageMetricSeries, UsageOverview,
+            UsagePage, UsageQuery, UsageSummary, UsageThroughputPercentiles,
         },
         provider_credentials::ProviderQuotaRequest,
     },
@@ -76,6 +76,12 @@ pub trait ObservabilityService: Send + Sync {
         filter: UsageFilter,
         metric: UsageInsightMetric,
     ) -> Result<UsageInsight, AdminError>;
+    async fn key_model_costs(
+        &self,
+        key: &ClientApiKeyId,
+        range: TimeRange,
+        provider: Option<String>,
+    ) -> Result<KeyModelCosts, AdminError>;
     async fn diagnostics(
         &self,
         range: TimeRange,
@@ -87,6 +93,51 @@ pub trait ObservabilityService: Send + Sync {
         &self,
         target: crate::model::diagnostics::DiagnosticTarget,
     ) -> Result<crate::model::diagnostics::DiagnosticBundle, AdminError>;
+}
+
+pub(crate) async fn key_model_costs(
+    store: &dyn ObservabilityStore,
+    key: &ClientApiKeyId,
+    range: TimeRange,
+    model: Option<String>,
+    provider: Option<String>,
+) -> Result<KeyModelCosts, AdminError> {
+    let observation = store
+        .usage_diagnostics(
+            range,
+            UsageFilter {
+                client_api_key_ref: Some(key.as_str().to_owned()),
+                model_contains: model,
+                provider_kind: provider,
+                ..UsageFilter::default()
+            },
+            DiagnosticDimension::RequestedModel,
+            100,
+        )
+        .await
+        .map_err(|error| map_store_error(error, "key model costs"))?;
+    let displayed_requests = observation
+        .items
+        .iter()
+        .map(|item| item.request_count)
+        .sum::<u64>();
+    Ok(KeyModelCosts {
+        truncated: displayed_requests < observation.total_request_count,
+        items: observation
+            .items
+            .into_iter()
+            .map(|item| ModelCost {
+                model: (!item.key.is_empty()).then_some(item.key),
+                cost_usd: item
+                    .costs
+                    .into_iter()
+                    .find(|cost| cost.currency.eq_ignore_ascii_case("USD"))
+                    .map(|cost| cost.amount),
+                cost_incomplete: item.cost_coverage.partial_count > 0
+                    || item.cost_coverage.unavailable_count > 0,
+            })
+            .collect(),
+    })
 }
 
 pub(crate) struct DefaultObservabilityService {
@@ -334,6 +385,15 @@ impl ObservabilityService for DefaultObservabilityService {
             .map_err(|error| map_store_error(error, "usage metric"))?;
         let insights = insights_from_observation(observation)?;
         Ok(select_usage_metric(insights, metric))
+    }
+
+    async fn key_model_costs(
+        &self,
+        key: &ClientApiKeyId,
+        range: TimeRange,
+        provider: Option<String>,
+    ) -> Result<KeyModelCosts, AdminError> {
+        key_model_costs(self.store.as_ref(), key, range, None, provider).await
     }
 
     async fn diagnostics(

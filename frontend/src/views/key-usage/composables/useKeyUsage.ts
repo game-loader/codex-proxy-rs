@@ -1,7 +1,8 @@
 import type { KeyUsageOverview, KeyUsageRecordKind } from '@/api/modules/key-usage'
+import type { KeyModelCosts } from '@/api/modules/usage'
 import { refDebounced, useDocumentVisibility, useTimeoutPoll } from '@vueuse/core'
 import { computed, shallowRef, watch } from 'vue'
-import { getKeyUsageOverview, getKeyUsageRecords } from '@/api/modules/key-usage'
+import { getKeyUsageModelCosts, getKeyUsageOverview, getKeyUsageRecords } from '@/api/modules/key-usage'
 import { useRequestState } from '@/composables/useRequestState'
 import { useStablePagedQuery } from '@/composables/useStablePagedQuery'
 
@@ -12,8 +13,10 @@ export function useKeyUsage() {
   const kind = shallowRef<KeyUsageRecordKind>('success')
   const refreshInterval = shallowRef('30')
   const overview = shallowRef<KeyUsageOverview>()
+  const modelCosts = shallowRef<KeyModelCosts>()
   const refreshing = shallowRef(false)
   const overviewRequest = useRequestState()
+  const costsRequest = useRequestState()
   const rangeEnd = shallowRef(Date.now())
   const query = computed(() => {
     return {
@@ -49,14 +52,32 @@ export function useKeyUsage() {
     }
   }
 
+  async function loadModelCosts(silent = false) {
+    const id = costsRequest.start(silent && Boolean(modelCosts.value))
+    try {
+      const result = await getKeyUsageModelCosts(query.value, { signal: costsRequest.signal, silent })
+      if (costsRequest.isCurrent(id))
+        modelCosts.value = result
+    }
+    catch (cause) {
+      if (costsRequest.isCurrent(id) && !silent)
+        modelCosts.value = undefined
+      costsRequest.fail(id, cause, silent && Boolean(modelCosts.value))
+    }
+    finally {
+      costsRequest.finish(id)
+    }
+  }
+
   async function refresh(silent = false) {
-    if (refreshing.value || overviewRequest.loading.value || records.loading.value)
+    if (refreshing.value || overviewRequest.loading.value || costsRequest.loading.value || records.loading.value)
       return
     refreshing.value = true
     rangeEnd.value = Date.now()
     try {
       await Promise.all([
         loadOverview(silent),
+        loadModelCosts(silent),
         records.execute(undefined, { silent }),
       ])
     }
@@ -68,7 +89,9 @@ export function useKeyUsage() {
   watch([period, selectedModel], () => {
     rangeEnd.value = Date.now()
     overview.value = undefined
+    modelCosts.value = undefined
     void loadOverview()
+    void loadModelCosts()
     void records.reloadFromStart()
   }, { immediate: true })
 
@@ -102,6 +125,9 @@ export function useKeyUsage() {
     overview,
     refreshing,
     overviewLoading: overviewRequest.loading,
+    modelCosts,
+    modelCostsLoading: costsRequest.loading,
+    modelCostsError: costsRequest.error,
     records,
     refresh,
     changePageSize,

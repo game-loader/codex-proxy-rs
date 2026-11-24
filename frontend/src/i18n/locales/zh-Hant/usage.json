@@ -241,6 +241,14 @@
       "errors": "錯誤 {count} 次",
       "errorRate": "錯誤率 {rate}"
     },
+    "modelCosts": {
+      "title": "模型費用",
+      "selectKey": "選擇 API Key",
+      "noKeys": "沒有 API Key",
+      "empty": "此範圍內沒有模型用量",
+      "partial": "部分已知",
+      "truncated": "僅顯示請求量最高的 100 組"
+    },
     "cost": {
       "savings": "節省",
       "cache": "緩存",

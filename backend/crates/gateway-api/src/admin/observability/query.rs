@@ -55,6 +55,18 @@ pub struct UsageAnalyticsQuery {
     pub end_time: Option<String>,
 }
 
+/// 按精确 Key ID 读取费用分组
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KeyModelCostsQuery {
+    pub client_api_key_id: String,
+    pub provider: Option<String>,
+    pub period: Option<String>,
+    pub as_of: Option<i64>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+}
+
 /// 卡片内的指标选择与时间、Provider 范围
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

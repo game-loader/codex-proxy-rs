@@ -18,6 +18,7 @@ fn input(model: &str) -> ProviderUsagePricingInput {
     let mut usage = Usage::new();
     usage.input_tokens = Some(1_000_000);
     usage.cached_input_tokens = Some(900_000);
+    usage.cache_write_input_tokens = Some(20_000);
     usage.output_tokens = Some(100_000);
     ProviderUsagePricingInput {
         upstream_model_id: model.to_owned(),
@@ -63,7 +64,15 @@ fn unconfigured_models_use_builtin_prices() {
         Some("2.58")
     );
     assert_eq!(total(admin.as_ref(), "unknown-model", None), None);
-    for (model, expected) in [("gpt-6.2-astra", "5.16"), ("gpt-6.2-sol", "1.29")] {
+    for (model, expected) in [
+        ("gpt-6.2-astra", "5.2"),
+        ("gpt-6.2-sol", "1.3"),
+        ("glm-5.3", "0.814"),
+        ("glm-5.4", "0.814"),
+        ("deepseek-flash", "0.1554"),
+        ("deepseek-v4-flash", "0.1554"),
+        ("deepseek-v4-flash-vision-exp", "0.1554"),
+    ] {
         assert_eq!(
             total(admin.as_ref(), model, None).as_deref(),
             Some(expected)
@@ -95,8 +104,14 @@ fn overrides_take_precedence_by_band_and_multiplier() {
         )]),
     };
     // 0.1M × 1 + 0.1M × 1
+    for model in ["k3.1-pro-highspeed", "glm-5.3", "glm-5.4", "deepseek-flash"] {
+        assert_eq!(
+            total(admin.as_ref(), model, Some(&custom)).as_deref(),
+            Some("0.2")
+        );
+    }
     assert_eq!(
-        total(admin.as_ref(), "k3.1-pro-highspeed", Some(&custom)).as_deref(),
-        Some("0.2")
+        total(admin.as_ref(), "glm-5.4", Some(&multiplier_only)).as_deref(),
+        Some("1.628")
     );
 }
