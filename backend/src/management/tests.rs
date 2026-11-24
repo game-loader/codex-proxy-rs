@@ -197,8 +197,7 @@ fn batch(items: Vec<usage::UsageReadItem>, complete: bool) -> usage::UsageReadBa
     }
 }
 
-#[tokio::test]
-async fn management_route_uses_every_statistics_batch_and_key_page() {
+async fn start(timezone: Tz) -> (DuplexStream, tokio::task::JoinHandle<()>) {
     let manifest = Manifest::from_author_slice(AUTHOR_MANIFEST).unwrap();
     let (mut host, plugin_peer) = tokio::io::duplex(16 * 1024);
     let server = tokio::spawn(async move {
@@ -206,7 +205,7 @@ async fn management_route_uses_every_statistics_batch_and_key_page() {
         PluginSession::accept(r, w, SessionConfig::default())
             .await
             .unwrap()
-            .run(plugin(chrono_tz::America::New_York).unwrap())
+            .run(plugin(timezone).unwrap())
             .await
             .unwrap();
     });
@@ -232,6 +231,22 @@ async fn management_route_uses_every_statistics_batch_and_key_page() {
         Message::Ready { .. }
     ));
 
+    (host, server)
+}
+
+async fn stop(mut host: DuplexStream, server: tokio::task::JoinHandle<()>) {
+    write_frame(&mut host, &Frame::control(Message::Shutdown))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn management_route_uses_every_statistics_batch_and_key_page() {
+    let (mut host, server) = start(chrono_tz::America::New_York).await;
     call(
         &mut host,
         1,
@@ -344,11 +359,193 @@ async fn management_route_uses_every_statistics_batch_and_key_page() {
         assert_eq!(rows[4]["usd"], Value::Null);
         assert_eq!(rows[4]["tokens"], "0");
     }
-    write_frame(&mut host, &Frame::control(Message::Shutdown))
-        .await
-        .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), server)
-        .await
+    stop(host, server).await;
+}
+
+async fn snapshot(host: &mut DuplexStream, namespace: &str, day: &Window, rows: Option<Value>) {
+    let (id, params, _) = callback(host, "host.state.get").await;
+    assert_eq!(params["namespace"], namespace);
+    assert_eq!(params["key"], format!("UTC/{}", day.start_date));
+    let record = rows.map(|rows| {
+        json!({
+            "version": 1, "schema_version": 1,
+            "value": {"start_ms": day.start_ms, "end_ms": day.end_ms, "rows": rows}
+        })
+    });
+    host_reply(host, id, json!({"record": record}), Vec::new()).await;
+}
+
+#[tokio::test]
+async fn legacy_archive_preserves_key_totals_without_fabricating_model_rows() {
+    let timezone = chrono_tz::UTC;
+    let (mut host, server) = start(timezone).await;
+    let february = Window::parse("period=month&date=2024-02-01", timezone, Utc::now())
         .unwrap()
+        .0;
+    let day = Window::day(february.start_date, timezone).unwrap();
+    let totals = json!({"stable": ["4.25", "2", "20", "1"]});
+
+    for (id, key, expected_status) in [(1, "stable", 422), (3, "other", 200)] {
+        route(
+            &mut host,
+            id,
+            &format!("period=day&date=2024-02-01&keyId={key}"),
+        )
+        .await;
+        retention_settings(&mut host, 31).await;
+        snapshot(&mut host, "model-ranking", &day, None).await;
+        snapshot(&mut host, "monthly-ranking", &day, Some(totals.clone())).await;
+        let (meta, body) = result(&mut host, id).await;
+        assert_eq!(meta["status"], expected_status);
+        if expected_status == 422 {
+            assert_eq!(body["error"]["code"], "history_unavailable");
+        } else {
+            assert_eq!(body["models"], json!([]));
+        }
+    }
+
+    route(&mut host, 5, "period=month&date=2024-02-01").await;
+    retention_settings(&mut host, 31).await;
+    for date in february.start_date.iter_days().take(29) {
+        let day = Window::day(date, timezone).unwrap();
+        let rows = if date == february.start_date {
+            totals.clone()
+        } else {
+            json!({})
+        };
+        snapshot(&mut host, "monthly-ranking", &day, Some(rows)).await;
+    }
+    let (cb, _, _) = callback(&mut host, KEYS_LIST).await;
+    host_reply(
+        &mut host,
+        cb,
+        json!({"keys":[],"next_cursor":null}),
+        Vec::new(),
+    )
+    .await;
+    let (meta, body) = result(&mut host, 5).await;
+    assert_eq!(meta["status"], 200);
+    assert_eq!(
+        body["rows"],
+        json!([{
+            "keyId":"stable", "keyName":"stable", "usd":"4.25",
+            "requests":"2", "tokens":"20", "unknownCosts":"1"
+        }])
+    );
+    stop(host, server).await;
+}
+
+fn model_statistics_row(
+    model: Option<&str>,
+    unassigned_contribution: bool,
+    usd: Option<&str>,
+    tokens: Option<u64>,
+) -> usage::UsageReadItem {
+    let costs: Vec<_> = usd.map(|amount| ("USD", amount)).into_iter().collect();
+    let mut item = statistics_row(Some("stable"), &costs, tokens);
+    let usage::UsageReadItem::Statistics(row) = &mut item else {
+        unreachable!();
+    };
+    let group = row.group.as_mut().unwrap();
+    group.model = model.map(str::to_owned);
+    group.unassigned_contribution = unassigned_contribution;
+    item
+}
+
+#[tokio::test]
+async fn model_detail_merges_archived_and_filtered_live_groups_with_exact_ordering() {
+    let timezone = chrono_tz::UTC;
+    let (mut host, server) = start(timezone).await;
+    let now = Utc::now();
+    let previous_week = now.date_naive() - chrono::Days::new(7);
+    let query = format!("period=week&date={previous_week}&keyId=stable");
+    let week = Window::parse(&query, timezone, now).unwrap().0;
+    let days = (now.date_naive() - week.start_date).num_days() as u32 - 2;
+    let first_live = week
+        .start_date
+        .iter_days()
+        .find(|date| {
+            Window::day(*date, timezone)
+                .unwrap()
+                .is_retained_at(now.timestamp_millis(), days)
+        })
         .unwrap();
+
+    route(&mut host, 1, &query).await;
+    retention_settings(&mut host, days).await;
+    for date in week
+        .start_date
+        .iter_days()
+        .take_while(|date| *date < first_live)
+    {
+        let day = Window::day(date, timezone).unwrap();
+        let rows = if date == week.start_date {
+            json!({
+                "stable": [["other-model", ["1", "1", null, "0"]], [null, ["0.5", "1", "0", "0"]]],
+                "other-key": [["other-model", ["100", "10", "20", "0"]]]
+            })
+        } else {
+            json!({})
+        };
+        snapshot(&mut host, "model-ranking", &day, Some(rows)).await;
+    }
+
+    let (cb, _, payload) = callback(&mut host, usage::STATISTICS_QUERY).await;
+    let query: usage::QueryUsageStatistics = serde_json::from_slice(&payload).unwrap();
+    assert_eq!(query.group_by, usage::UsageGrouping::KeyModel);
+    assert_eq!(
+        query.filter.records.client_key_ref.as_deref(),
+        Some("stable")
+    );
+    assert_eq!(
+        query.filter.records.start_ms,
+        Window::day(first_live, timezone).unwrap().start_ms
+    );
+    assert_eq!(query.filter.records.end_ms, week.end_ms);
+
+    let opened = usage::UsageReadOpened {
+        reader: Some("models".into()),
+        batch: batch(
+            vec![
+                statistics_row(None, &[], None),
+                model_statistics_row(None, false, Some("0.5"), None),
+                model_statistics_row(Some("other-model"), false, Some("0.0000000001"), None),
+            ],
+            false,
+        ),
+    };
+    host_reply(
+        &mut host,
+        cb,
+        json!({}),
+        serde_json::to_vec(&opened).unwrap(),
+    )
+    .await;
+    let (cb, _, _) = callback(&mut host, usage::READ_NEXT).await;
+    let last = batch(
+        vec![
+            model_statistics_row(None, true, None, None),
+            model_statistics_row(Some("zero"), false, Some("0"), None),
+            model_statistics_row(Some("unknown"), false, None, None),
+        ],
+        true,
+    );
+    host_reply(&mut host, cb, json!({}), serde_json::to_vec(&last).unwrap()).await;
+
+    let (meta, body) = result(&mut host, 1).await;
+    assert_eq!(meta["status"], 200);
+    assert_eq!(
+        body,
+        json!({
+            "period": "week", "startDate": week.start_date.to_string(),
+            "endDate": week.end_date.to_string(), "timezone": "UTC",
+            "models": [
+                {"model":"other-model","usd":"1.0000000001","requests":"9007199254740994","tokens":null,"unknownCosts":"2"},
+                {"model":null,"usd":"1","requests":"18014398509481987","tokens":"0","unknownCosts":"4"},
+                {"model":"zero","usd":"0","requests":"9007199254740993","tokens":null,"unknownCosts":"2"},
+                {"model":"unknown","usd":null,"requests":"9007199254740993","tokens":null,"unknownCosts":"2"}
+            ]
+        })
+    );
+    stop(host, server).await;
 }

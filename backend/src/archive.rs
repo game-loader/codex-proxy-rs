@@ -1,7 +1,7 @@
-//! 按自然日保存 Key 用量，在宿主清理后继续按月排行
+//! 按自然日独立保存 Key 总量和模型明细，在宿主清理后继续排行
 
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque, hash_map::Entry},
+    collections::{BTreeMap, HashMap, VecDeque},
     time::{Duration, Instant},
 };
 
@@ -13,22 +13,36 @@ use gateway_plugin_sdk::{
         host::{
             STATE_GET, STATE_PUT, StateGetRequest, StateGetResult, StatePutRequest, StatePutResult,
         },
-        services::{
-            settings,
-            usage::{UsageCount, UsageReadObservation},
-        },
+        services::{settings, usage::UsageReadObservation},
     },
     client::{Empty, HostClient, SessionError, TypedCall, TypedReply},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::{
-    calendar::{Period, Window},
-    ranking::{self, MAX_ROWS, RankingError, Row},
+    calendar::Window,
+    ranking::{self, Metrics, ModelRow, ModelTotals, RankingError, Row, add},
 };
 
-const NAMESPACE: &str = "monthly-ranking";
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Archive {
+    Keys,
+    Models,
+}
+
+impl Archive {
+    fn namespace(self) -> &'static str {
+        match self {
+            Self::Keys => "monthly-ranking",
+            Self::Models => "model-ranking",
+        }
+    }
+}
+
+type KeyRows = BTreeMap<String, Metrics>;
+type ModelRows = BTreeMap<String, Vec<(Option<String>, Metrics)>>;
 const BATCH_DAYS: usize = 3;
 const SCAN_INTERVAL: Duration = Duration::from_secs(2 * 60 * 60);
 const RETRY_INTERVAL: Duration = Duration::from_secs(15 * 60);
@@ -36,7 +50,6 @@ const SETTLE_MS: i64 = TimeDelta::hours(2).num_milliseconds();
 const REFRESH_LEAD_MS: i64 = TimeDelta::days(2).num_milliseconds();
 const MAX_LAG_SECONDS: u64 = 60;
 const BACKFILL_DAYS: u64 = 62;
-const USD_SCALE: u128 = 10_000_000_000;
 
 #[derive(Default)]
 pub(crate) struct Maintenance {
@@ -45,8 +58,8 @@ pub(crate) struct Maintenance {
 
 struct Schedule {
     next_scan: Instant,
-    pending: VecDeque<(Window, Phase)>,
-    checked: BTreeMap<NaiveDate, Phase>,
+    pending: VecDeque<(Window, Phase, Archive)>,
+    checked: BTreeMap<(NaiveDate, Archive), Phase>,
     retention_days: u32,
 }
 
@@ -100,17 +113,19 @@ impl Schedule {
 
         let mut fault = None;
         for _ in 0..BATCH_DAYS {
-            let Some((window, phase)) = self.pending.pop_front() else {
+            let Some((window, phase, archive)) = self.pending.pop_front() else {
                 break;
             };
-            match capture(host, &window, timezone, self.retention_days, phase).await {
+            match capture(host, &window, timezone, self.retention_days, phase, archive).await {
                 Ok(()) => {
-                    self.checked.insert(window.start_date, phase);
+                    self.checked.insert((window.start_date, archive), phase);
                 }
                 Err(error) => {
                     self.next_scan = self.next_scan.min(Instant::now() + RETRY_INTERVAL);
-                    if matches!(error.code, ErrorCode::Upstream | ErrorCode::Cancelled) {
-                        // 统计回填会影响整轮，等到下一次扫描再读宿主。
+                    if archive == Archive::Keys
+                        && matches!(error.code, ErrorCode::Upstream | ErrorCode::Cancelled)
+                    {
+                        // Key 统计回填会影响整轮，等到下一次扫描再读宿主
                         self.pending.clear();
                         return Err(error);
                     }
@@ -135,8 +150,8 @@ impl Schedule {
             .unwrap_or(NaiveDate::MIN);
 
         // 回填最近历史。长保留期也在旧数据即将过期时补齐或刷新。
-        self.checked.retain(|date, _| *date >= near_expiry);
-        for date in near_expiry
+        self.checked.retain(|(date, _), _| *date >= near_expiry);
+        let dates = near_expiry
             .iter_days()
             .take(4)
             .take_while(|date| *date < recent)
@@ -145,18 +160,27 @@ impl Schedule {
                     .max(recent)
                     .iter_days()
                     .take_while(|date| *date < today),
-            )
-        {
-            let window = day_window(date, timezone, now)?;
-            if let Some(phase) = capture_phase(&window, now.timestamp_millis(), self.retention_days)
-                && self
+            );
+        for date in dates {
+            let window = day_window(date, timezone)?;
+            let Some(phase) = capture_phase(&window, now.timestamp_millis(), self.retention_days)
+            else {
+                continue;
+            };
+            for archive in [Archive::Keys, Archive::Models] {
+                if self
                     .checked
-                    .get(&date)
+                    .get(&(date, archive))
                     .is_none_or(|checked| *checked < phase)
-            {
-                self.pending.push_back((window, phase));
+                {
+                    self.pending.push_back((window.clone(), phase, archive));
+                }
             }
         }
+        // 给即将过期的 Key 总量留出与独立归档前相同的处理顺序
+        self.pending
+            .make_contiguous()
+            .sort_by_key(|(_, _, archive)| *archive);
         Ok(())
     }
 }
@@ -189,30 +213,55 @@ async fn capture(
     timezone: Tz,
     days: u32,
     phase: Phase,
+    archive: Archive,
 ) -> Result<(), PluginFault> {
     if !window.is_retained_at(Utc::now().timestamp_millis(), days) {
         return Err(ranking_fault(RankingError::HistoryUnavailable));
     }
-    let prior = read_snapshot(host, window, timezone).await?;
+    let prior = read_snapshot::<Value>(host, window, timezone, archive).await?;
     if phase == Phase::Capture && prior.is_some() {
         return Ok(());
     }
 
-    let rows = ranking::read_rows(host, window, days, archive_ready)
-        .await
-        .map_err(ranking_fault)?;
+    let rows = match archive {
+        Archive::Keys => {
+            let rows = ranking::read_rows(host, window, days, archive_ready)
+                .await
+                .map_err(ranking_fault)?;
+            let rows: KeyRows = rows
+                .into_values()
+                .map(|row| {
+                    (
+                        row.key_id,
+                        Metrics(row.usd, row.requests, row.tokens, row.unknown_costs),
+                    )
+                })
+                .collect();
+            serde_json::to_value(rows)
+        }
+        Archive::Models => {
+            let rows = ranking::read_models(host, window, days, None, archive_ready)
+                .await
+                .map_err(ranking_fault)?;
+            let rows: ModelRows = rows
+                .into_iter()
+                .map(|(id, models)| {
+                    let mut models: Vec<_> = models
+                        .into_iter()
+                        .map(|(model, total)| (model, Metrics::from(total)))
+                        .collect();
+                    models.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+                    (id, models)
+                })
+                .collect();
+            serde_json::to_value(rows)
+        }
+    }
+    .map_err(invalid_state)?;
     let snapshot = Snapshot {
         start_ms: window.start_ms,
         end_ms: window.end_ms,
-        rows: rows
-            .into_values()
-            .map(|row| {
-                (
-                    row.key_id,
-                    Metrics(row.usd, row.requests, row.tokens, row.unknown_costs),
-                )
-            })
-            .collect(),
+        rows,
     };
     if prior.as_ref().is_some_and(|(old, _)| *old == snapshot) {
         return Ok(());
@@ -222,7 +271,7 @@ async fn capture(
         host,
         STATE_PUT,
         &StatePutRequest {
-            namespace: NAMESPACE.to_owned(),
+            namespace: archive.namespace().to_owned(),
             key: state_key(window.start_date, timezone),
             value,
             expected_version: prior.map(|(_, version)| version),
@@ -261,36 +310,17 @@ pub(crate) async fn load_month(
     now: DateTime<Utc>,
 ) -> Result<Vec<Row>, RankingError> {
     let days = retention_days(host).await.map_err(state_error)?;
-    if window.is_retained_at(now.timestamp_millis(), days) {
-        let rows = ranking::read_rows(host, window, days, |_, _| true).await?;
+    let (archived, live) = split_retention(window, timezone, now, days)?;
+    if archived.is_empty()
+        && let Some(live) = &live
+    {
+        let rows = ranking::read_rows(host, live, days, |_, _| true).await?;
         return ranking::finish(host, rows).await;
     }
 
     let mut totals = HashMap::new();
-    for date in window
-        .start_date
-        .iter_days()
-        .take_while(|date| *date <= window.end_date)
-    {
-        let day = day_window(date, timezone, now)?;
-        if day.start_ms == day.end_ms {
-            continue;
-        }
-        if day.is_retained_at(now.timestamp_millis(), days) {
-            let suffix = Window {
-                period: Period::Month,
-                start_date: date,
-                end_date: window.end_date,
-                start_ms: day.start_ms,
-                end_ms: window.end_ms,
-            };
-            let live = ranking::read_rows(host, &suffix, days, |_, _| true).await?;
-            for (id, row) in live {
-                add(&mut totals, id, Totals::from(row))?;
-            }
-            break;
-        }
-        let (snapshot, _) = read_snapshot(host, &day, timezone)
+    for day in archived {
+        let (snapshot, _) = read_snapshot::<KeyRows>(host, &day, timezone, Archive::Keys)
             .await
             .map_err(state_error)?
             .ok_or(RankingError::HistoryUnavailable)?;
@@ -298,131 +328,123 @@ pub(crate) async fn load_month(
             add(&mut totals, id, metrics.try_into()?)?;
         }
     }
+    if let Some(live) = live {
+        let rows = ranking::read_rows(host, &live, days, |_, _| true).await?;
+        for (id, row) in rows {
+            add(&mut totals, id, row.into())?;
+        }
+    }
     let rows = totals
         .into_iter()
-        .map(|(key_id, total)| {
-            let row = Row {
-                key_name: key_id.clone(),
-                usd: total.usd.map(format_usd),
-                requests: UsageCount(total.requests),
-                tokens: total.tokens.map(UsageCount),
-                unknown_costs: UsageCount(total.unknown_costs),
-                scaled_usd: total.usd,
-                key_id: key_id.clone(),
-            };
-            (key_id, row)
-        })
+        .map(|(key_id, total)| (key_id.clone(), Row::from_total(key_id, total)))
         .collect();
     ranking::finish(host, rows).await
 }
 
+pub(crate) async fn load_models(
+    host: &HostClient,
+    window: &Window,
+    timezone: Tz,
+    now: DateTime<Utc>,
+    key_id: &str,
+) -> Result<Vec<ModelRow>, RankingError> {
+    if window.start_ms == window.end_ms {
+        return Ok(Vec::new());
+    }
+    let days = retention_days(host).await.map_err(state_error)?;
+    let (archived, live) = split_retention(window, timezone, now, days)?;
+    let mut models = ModelTotals::new();
+    for day in archived {
+        if let Some((mut snapshot, _)) =
+            read_snapshot::<ModelRows>(host, &day, timezone, Archive::Models)
+                .await
+                .map_err(state_error)?
+        {
+            for (model, metrics) in snapshot.rows.remove(key_id).into_iter().flatten() {
+                add(&mut models, model, metrics.try_into()?)?;
+            }
+        } else {
+            // 旧归档只能证明某个 Key 没有用量，不能把其总量归入未知模型
+            let (snapshot, _) = read_snapshot::<KeyRows>(host, &day, timezone, Archive::Keys)
+                .await
+                .map_err(state_error)?
+                .ok_or(RankingError::HistoryUnavailable)?;
+            if snapshot.rows.contains_key(key_id) {
+                return Err(RankingError::HistoryUnavailable);
+            }
+        }
+    }
+    if let Some(live) = live {
+        let mut keys = ranking::read_models(host, &live, days, Some(key_id), |_, _| true).await?;
+        for (model, total) in keys.remove(key_id).into_iter().flatten() {
+            add(&mut models, model, total)?;
+        }
+    }
+    Ok(ranking::finish_models(models))
+}
+
+fn split_retention(
+    window: &Window,
+    timezone: Tz,
+    now: DateTime<Utc>,
+    days: u32,
+) -> Result<(Vec<Window>, Option<Window>), RankingError> {
+    let now_ms = now.timestamp_millis();
+    if window.is_retained_at(now_ms, days) {
+        return Ok((Vec::new(), Some(window.clone())));
+    }
+    let mut archived = Vec::new();
+    for date in window
+        .start_date
+        .iter_days()
+        .take_while(|date| *date <= window.end_date)
+    {
+        let day = day_window(date, timezone)?;
+        if day.start_ms == day.end_ms {
+            continue;
+        }
+        if day.is_retained_at(now_ms, days) {
+            return Ok((
+                archived,
+                Some(Window {
+                    start_date: date,
+                    start_ms: day.start_ms,
+                    ..window.clone()
+                }),
+            ));
+        }
+        archived.push(day);
+    }
+    Ok((archived, None))
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Snapshot {
+struct Snapshot<R> {
     start_ms: i64,
     end_ms: i64,
-    rows: BTreeMap<String, Metrics>,
+    rows: R,
 }
 
-// 费用为原始十进制字符串，计数复用 SDK 的无损字符串编码。
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct Metrics(Option<String>, UsageCount, Option<UsageCount>, UsageCount);
-
-#[derive(Debug, PartialEq, Eq)]
-struct Totals {
-    usd: Option<u128>,
-    requests: u64,
-    tokens: Option<u64>,
-    unknown_costs: u64,
-}
-
-impl TryFrom<Metrics> for Totals {
-    type Error = RankingError;
-
-    fn try_from(metrics: Metrics) -> Result<Self, RankingError> {
-        let Metrics(usd, requests, tokens, unknown_costs) = metrics;
-        Ok(Self {
-            usd: usd
-                .as_deref()
-                .map(|amount| ranking::scaled_amount(amount).ok_or(RankingError::InvalidStatistics))
-                .transpose()?,
-            requests: requests.get(),
-            tokens: tokens.map(UsageCount::get),
-            unknown_costs: unknown_costs.get(),
-        })
-    }
-}
-
-impl From<Row> for Totals {
-    fn from(row: Row) -> Self {
-        Self {
-            usd: row.scaled_usd,
-            requests: row.requests.get(),
-            tokens: row.tokens.map(UsageCount::get),
-            unknown_costs: row.unknown_costs.get(),
-        }
-    }
-}
-
-fn add(totals: &mut HashMap<String, Totals>, id: String, next: Totals) -> Result<(), RankingError> {
-    let full = totals.len() >= MAX_ROWS;
-    match totals.entry(id) {
-        Entry::Vacant(entry) if !full => {
-            entry.insert(next);
-        }
-        Entry::Vacant(_) => return Err(RankingError::TooLarge),
-        Entry::Occupied(mut entry) => {
-            let total = entry.get_mut();
-            let overflow = RankingError::InvalidStatistics;
-            *total = Totals {
-                usd: match (total.usd, next.usd) {
-                    (Some(a), Some(b)) => Some(a.checked_add(b).ok_or(overflow)?),
-                    (a, b) => a.or(b),
-                },
-                requests: total.requests.checked_add(next.requests).ok_or(overflow)?,
-                tokens: match (total.tokens, next.tokens) {
-                    (Some(a), Some(b)) => Some(a.checked_add(b).ok_or(overflow)?),
-                    (a, b) => a.or(b),
-                },
-                unknown_costs: total
-                    .unknown_costs
-                    .checked_add(next.unknown_costs)
-                    .ok_or(overflow)?,
-            };
-        }
-    }
-    Ok(())
-}
-
-fn format_usd(amount: u128) -> String {
-    let whole = amount / USD_SCALE;
-    let fraction = amount % USD_SCALE;
-    if fraction == 0 {
-        return whole.to_string();
-    }
-    let fraction = format!("{fraction:010}");
-    format!("{whole}.{}", fraction.trim_end_matches('0'))
-}
-
-fn day_window(date: NaiveDate, timezone: Tz, now: DateTime<Utc>) -> Result<Window, RankingError> {
-    Window::parse(&format!("period=day&date={date}"), timezone, now)
-        .map_err(|_| RankingError::InvalidStatistics)
+fn day_window(date: NaiveDate, timezone: Tz) -> Result<Window, RankingError> {
+    Window::day(date, timezone).ok_or(RankingError::InvalidStatistics)
 }
 
 fn state_key(date: NaiveDate, timezone: Tz) -> String {
     format!("{}/{date}", timezone.name())
 }
 
-async fn read_snapshot(
+async fn read_snapshot<R: DeserializeOwned>(
     host: &HostClient,
     window: &Window,
     timezone: Tz,
-) -> Result<Option<(Snapshot, u64)>, PluginFault> {
+    archive: Archive,
+) -> Result<Option<(Snapshot<R>, u64)>, PluginFault> {
     let result: StateGetResult = state_call(
         host,
         STATE_GET,
         &StateGetRequest {
-            namespace: NAMESPACE.to_owned(),
+            namespace: archive.namespace().to_owned(),
             key: state_key(window.start_date, timezone),
         },
     )
@@ -430,7 +452,8 @@ async fn read_snapshot(
     result
         .record
         .map(|record| {
-            let snapshot: Snapshot = serde_json::from_value(record.value).map_err(invalid_state)?;
+            let snapshot: Snapshot<R> =
+                serde_json::from_value(record.value).map_err(invalid_state)?;
             if record.schema_version != 1
                 || snapshot.start_ms != window.start_ms
                 || snapshot.end_ms != window.end_ms
@@ -498,6 +521,7 @@ fn ranking_fault(error: RankingError) -> PluginFault {
 mod tests {
     use super::*;
     use gateway_plugin_sdk::call::services::usage::UsageReadAnalytics;
+    use ranking::{Totals, format_usd};
 
     #[test]
     fn catches_up_before_retention_and_refreshes_through_dst() {
@@ -508,19 +532,20 @@ mod tests {
             ..Schedule::default()
         };
         schedule.plan(zone, now).unwrap();
-        let (first, phase) = schedule.pending.front().unwrap();
+        let (first, phase, archive) = schedule.pending.front().unwrap();
         assert_eq!(first.start_date.to_string(), "2024-03-07");
         assert_eq!(*phase, Phase::Refresh);
-        let (last, phase) = schedule.pending.back().unwrap();
+        assert_eq!(*archive, Archive::Keys);
+        let (last, phase, _) = schedule.pending.back().unwrap();
         assert_eq!(last.start_date.to_string(), "2024-04-05");
         assert_eq!(*phase, Phase::Capture);
-        for (window, phase) in schedule.pending.drain(..) {
-            schedule.checked.insert(window.start_date, phase);
+        for (window, phase, archive) in schedule.pending.drain(..) {
+            schedule.checked.insert((window.start_date, archive), phase);
         }
         schedule.plan(zone, now).unwrap();
         assert!(schedule.pending.is_empty());
 
-        let spring = day_window("2024-03-10".parse().unwrap(), zone, now).unwrap();
+        let spring = day_window("2024-03-10".parse().unwrap(), zone).unwrap();
         assert_eq!(
             spring.end_ms - spring.start_ms,
             TimeDelta::hours(23).num_milliseconds()
@@ -537,7 +562,7 @@ mod tests {
     #[test]
     fn idle_ready_and_recent_lag_can_archive_but_backfill_and_old_lag_cannot() {
         let now: DateTime<Utc> = "2024-04-01T03:00:00Z".parse().unwrap();
-        let day = day_window("2024-03-31".parse().unwrap(), chrono_tz::UTC, now).unwrap();
+        let day = day_window("2024-03-31".parse().unwrap(), chrono_tz::UTC).unwrap();
         let observation = |state: &str, lag_seconds, coverage_end_ms| UsageReadObservation {
             generated_at_ms: now.timestamp_millis(),
             analytics: Some(UsageReadAnalytics {
@@ -570,7 +595,7 @@ mod tests {
 
     #[test]
     fn merge_keeps_exact_costs_large_counts_and_known_zero() {
-        let mut totals = HashMap::new();
+        let mut totals = HashMap::<String, Totals>::new();
         let mut merge = |id: &str, json: &str| {
             let metrics: Metrics = serde_json::from_str(json).unwrap();
             add(&mut totals, id.into(), metrics.try_into().unwrap()).unwrap();

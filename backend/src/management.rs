@@ -21,7 +21,7 @@ use std::sync::Arc;
 use crate::{
     AUTHOR_MANIFEST,
     calendar::{Period, Window},
-    ranking::{self, RankingError, Row},
+    ranking::{self, ModelRow, RankingError, Row},
 };
 
 const ROUTE: &str = "ranking";
@@ -72,7 +72,15 @@ struct Report {
     start_date: String,
     end_date: String,
     timezone: &'static str,
-    rows: Vec<Row>,
+    #[serde(flatten)]
+    data: ReportData,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ReportData {
+    Keys { rows: Vec<Row> },
+    Models { models: Vec<ModelRow> },
 }
 
 type Reply = Result<TypedReply<ManagementResponse>, PluginFault>;
@@ -86,18 +94,25 @@ async fn handle(call: TypedCall<ManagementRequest>, timezone: Tz) -> Reply {
         return error(400, "invalid_query", "排行查询不接受请求正文");
     }
     let now = Utc::now();
-    let window = match Window::parse(&call.request.query, timezone, now) {
-        Ok(window) => window,
+    let (window, key_id) = match Window::parse(&call.request.query, timezone, now) {
+        Ok(query) => query,
         Err(message) => return error(400, "invalid_query", message),
     };
-    let rows = match window.period {
-        Period::Month => crate::archive::load_month(&call.host, &window, timezone, now).await,
-        Period::Day | Period::Week => {
-            ranking::load(&call.host, &window, now.timestamp_millis()).await
+    let data = if let Some(key_id) = key_id {
+        crate::archive::load_models(&call.host, &window, timezone, now, &key_id)
+            .await
+            .map(|models| ReportData::Models { models })
+    } else {
+        match window.period {
+            Period::Month => crate::archive::load_month(&call.host, &window, timezone, now).await,
+            Period::Day | Period::Week => {
+                ranking::load(&call.host, &window, now.timestamp_millis()).await
+            }
         }
+        .map(|rows| ReportData::Keys { rows })
     };
-    let rows = match rows {
-        Ok(rows) => rows,
+    let data = match data {
+        Ok(data) => data,
         Err(cause) => return ranking_error(cause),
     };
     let body = encode(&Report {
@@ -105,7 +120,7 @@ async fn handle(call: TypedCall<ManagementRequest>, timezone: Tz) -> Reply {
         start_date: window.start_date.to_string(),
         end_date: window.end_date.to_string(),
         timezone: timezone.name(),
-        rows,
+        data,
     })?;
     if body.len() > MAX_RESPONSE_BYTES {
         return ranking_error(RankingError::TooLarge);

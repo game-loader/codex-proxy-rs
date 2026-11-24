@@ -17,9 +17,11 @@ pub(crate) enum Period {
 struct Query {
     period: Period,
     date: Option<String>,
+    #[serde(rename = "keyId")]
+    key_id: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Window {
     pub period: Period,
     pub start_date: NaiveDate,
@@ -29,17 +31,29 @@ pub(crate) struct Window {
 }
 
 impl Window {
-    pub fn parse(query: &str, timezone: Tz, now: DateTime<Utc>) -> Result<Self, &'static str> {
+    pub fn parse(
+        query: &str,
+        timezone: Tz,
+        now: DateTime<Utc>,
+    ) -> Result<(Self, Option<String>), &'static str> {
         if query.len() > 128 {
             return Err("排行查询参数过长");
         }
-        let query: Query =
-            serde_urlencoded::from_str(query).map_err(|_| "请指定有效的 period，可选填 date")?;
+        let query: Query = serde_urlencoded::from_str(query)
+            .map_err(|_| "请指定有效的 period，可选填 date 和 keyId")?;
         let date = match query.date {
             Some(date) => parse_date(&date).ok_or("date 必须是有效的 YYYY-MM-DD 日期")?,
             None => now.with_timezone(&timezone).date_naive(),
         };
-        bounds(query.period, date, timezone).ok_or("排行日期超出可查询范围")
+        if query.key_id.as_ref().is_some_and(String::is_empty) {
+            return Err("keyId 不能为空");
+        }
+        let window = bounds(query.period, date, timezone).ok_or("排行日期超出可查询范围")?;
+        Ok((window, query.key_id))
+    }
+
+    pub fn day(date: NaiveDate, timezone: Tz) -> Option<Self> {
+        bounds(Period::Day, date, timezone)
     }
 
     pub fn is_retained_at(&self, now_ms: i64, retention_days: u32) -> bool {
@@ -101,10 +115,13 @@ mod tests {
     #[test]
     fn defaults_to_deployment_date_and_uses_full_civil_periods() {
         let zone = chrono_tz::America::New_York;
-        let month = Window::parse("period=month", zone, now()).unwrap();
+        let (month, key_id) = Window::parse("period=month", zone, now()).unwrap();
+        assert_eq!(key_id, None);
         assert_eq!(month.start_date.to_string(), "2024-02-01");
         assert_eq!(month.end_date.to_string(), "2024-02-29");
-        let week = Window::parse("period=week&date=2024-03-10", zone, now()).unwrap();
+        let (week, key_id) =
+            Window::parse("period=week&date=2024-03-10&keyId=stable-id", zone, now()).unwrap();
+        assert_eq!(key_id.as_deref(), Some("stable-id"));
         assert_eq!(week.start_date.to_string(), "2024-03-04");
         assert_eq!(week.end_date.to_string(), "2024-03-10");
         assert_eq!(
@@ -116,7 +133,7 @@ mod tests {
     #[test]
     fn handles_skipped_dates_and_rejects_invalid_query_values() {
         let zone = chrono_tz::Pacific::Apia;
-        let skipped = Window::parse("period=day&date=2011-12-30", zone, now()).unwrap();
+        let (skipped, _) = Window::parse("period=day&date=2011-12-30", zone, now()).unwrap();
         assert_eq!(skipped.start_ms, skipped.end_ms);
         for query in [
             "date=2024-02-10",
@@ -125,6 +142,8 @@ mod tests {
             "period=day&date=2023-02-29",
             "period=day&date=",
             "period=day&period=week",
+            "period=day&keyId=",
+            "period=day&keyId=a&keyId=b",
         ] {
             assert!(Window::parse(query, zone, now()).is_err(), "{query}");
         }

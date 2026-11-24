@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import type { RankingRow } from '../../api/modules/ranking'
 import { ZButton, ZCard, ZDatePicker, ZEmpty, ZSegmented } from '@codex-proxy/ui'
 import { zhHans } from '@codex-proxy/ui/locale'
-import { computed } from 'vue'
+import { computed, nextTick, useTemplateRef } from 'vue'
 import RankingTable from './RankingTable.vue'
 import { useRanking } from './useRanking'
 
@@ -11,7 +12,22 @@ const periods = [
   { value: 'month', label: '月' },
 ]
 
-const { state, period, data, start, isCurrent, previous, next, setPeriod, setDate, goToCurrent, retry } = useRanking()
+const {
+  state,
+  range,
+  period,
+  selectedKey,
+  selectKey,
+  start,
+  isCurrent,
+  previous,
+  next,
+  setPeriod,
+  setDate,
+  goToCurrent,
+  retry,
+} = useRanking()
+const results = useTemplateRef('results')
 const periodLabel = computed(() => ({ day: '日', week: '周', month: '月' })[period.value])
 const currentLabel = computed(() => ({ day: '回到今天', week: '回到本周', month: '回到本月' })[period.value])
 const pickerLabel = computed(() => period.value === 'month'
@@ -26,14 +42,20 @@ const pickerValue = computed(() => period.value === 'month'
   ? start.value?.slice(0, 7)
   : start.value)
 const rangeLabel = computed(() => {
-  if (!data.value)
+  if (!range.value)
     return ''
-  const { startDate, endDate, timezone } = data.value
-  const range = startDate === endDate
+  const { startDate, endDate, timezone } = range.value
+  const dates = startDate === endDate
     ? startDate
     : `${startDate} 至 ${endDate}`
-  return `${range} · ${timezone}`
+  return `${dates} · ${timezone}`
 })
+
+async function updateKey(key?: Pick<RankingRow, 'keyId' | 'keyName'>) {
+  selectKey(key)
+  await nextTick()
+  results.value?.focus()
+}
 
 function updatePeriod(value: string) {
   if (value === 'day' || value === 'week' || value === 'month')
@@ -88,21 +110,40 @@ function updateDate(value: unknown) {
       </p>
     </div>
 
-    <ZCard padding="none" as="section" aria-label="排行结果">
-      <p v-if="state.status === 'loading'" class="ranking-status" role="status">
-        正在查询用量排行
-      </p>
-      <div v-else-if="state.status === 'error'" class="ranking-status">
-        <p role="alert">
-          {{ state.message }}
-        </p>
-        <ZButton @click="retry">
-          重试
+    <section ref="results" class="ranking-results" tabindex="-1" :aria-label="selectedKey ? '模型用量' : '排行结果'">
+      <div v-if="selectedKey" class="ranking-scope">
+        <ZButton size="small" @click="updateKey()">
+          返回排行
         </ZButton>
+        <h2 class="ranking-scope-title">
+          {{ selectedKey.keyName || selectedKey.keyId }} · 模型用量
+        </h2>
+        <span v-if="selectedKey.keyName && selectedKey.keyName !== selectedKey.keyId" class="ranking-scope-id">
+          {{ selectedKey.keyId }}
+        </span>
       </div>
-      <ZEmpty v-else-if="!state.data.rows.length" title="该时段没有用量记录" surface="none" />
-      <RankingTable v-else :rows="state.data.rows" />
-    </ZCard>
+      <ZCard padding="none">
+        <p v-if="state.status === 'loading'" class="ranking-status" role="status">
+          {{ selectedKey ? '正在查询模型用量' : '正在查询用量排行' }}
+        </p>
+        <div v-else-if="state.status === 'error'" class="ranking-status">
+          <p role="alert">
+            {{ state.message }}
+          </p>
+          <ZButton @click="retry">
+            重试
+          </ZButton>
+        </div>
+        <div v-else-if="state.status === 'unavailable'" role="status">
+          <ZEmpty title="所选时段无法按模型查看" :description="state.message" surface="none" />
+        </div>
+        <template v-else-if="state.status === 'ready'">
+          <ZEmpty v-if="'models' in state.data && !state.data.models.length" title="该 Key 在所选时段没有模型用量" surface="none" />
+          <ZEmpty v-else-if="'rows' in state.data && !state.data.rows.length" title="该时段没有用量记录" surface="none" />
+          <RankingTable v-else :report="state.data" @select-key="updateKey" />
+        </template>
+      </ZCard>
+    </section>
   </main>
 </template>
 
@@ -137,6 +178,35 @@ function updateDate(value: unknown) {
   margin-inline-start: auto;
   color: var(--z-color-text-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+.ranking-results {
+  min-inline-size: 0;
+}
+
+.ranking-results:focus-visible {
+  outline: 2px solid var(--z-color-primary);
+  outline-offset: 2px;
+}
+
+.ranking-scope {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-end: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.ranking-scope-title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.ranking-scope-id {
+  color: var(--z-color-text-secondary);
+  font-size: var(--z-font-size-sm, 12px);
 }
 
 .ranking-status {

@@ -20,6 +20,12 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+export class ManagementError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message)
+  }
+}
+
 export async function request({ path, query }: { path: string, query: URLSearchParams }): Promise<unknown> {
   const host = window.codexProxyPlugin
   if (host?.version !== 2)
@@ -54,8 +60,17 @@ export async function request({ path, query }: { path: string, query: URLSearchP
   }
 
   if (failed) {
-    if (isRecord(value) && isRecord(value.error) && typeof value.error.message === 'string' && value.error.message)
-      throw new Error(value.error.message)
+    if (isRecord(value) && isRecord(value.error)) {
+      const { code, message } = value.error
+      throw new ManagementError(
+        typeof message === 'string' && message
+          ? message
+          : statusMessage,
+        typeof code === 'string'
+          ? code
+          : undefined,
+      )
+    }
     throw new Error(statusMessage)
   }
   return value

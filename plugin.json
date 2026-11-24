@@ -3,8 +3,8 @@
   "publisher": "game-loader",
   "name": "key-usage-ranking",
   "displayName": "Key 用量排行",
-  "version": "0.1.0",
-  "description": "按日、周或月查看各 Key 的已知美元费用和用量",
+  "version": "0.2.0",
+  "description": "按日、周或月查看各 Key 和模型的已知美元费用与用量",
   "license": "Apache-2.0",
   "engines": {
     "codex-proxy-rs": ">=3.50.0, <3.51.0"
@@ -41,6 +41,33 @@
   "state": [
     {
       "namespace": "monthly-ranking",
+      "schemaVersion": 1,
+      "schema": {
+        "type": "object",
+        "required": [
+          "start_ms",
+          "end_ms",
+          "rows"
+        ],
+        "properties": {
+          "start_ms": {
+            "type": "integer"
+          },
+          "end_ms": {
+            "type": "integer"
+          },
+          "rows": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "maximumRecords": 10000,
+      "maximumBytes": 16777216,
+      "maximumValueBytes": 262144
+    },
+    {
+      "namespace": "model-ranking",
       "schemaVersion": 1,
       "schema": {
         "type": "object",

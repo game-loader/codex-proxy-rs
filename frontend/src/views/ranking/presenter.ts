@@ -1,4 +1,4 @@
-import type { RankingRow } from '../../api/modules/ranking'
+import type { RankingRow, UsageMetrics } from '../../api/modules/ranking'
 
 function formatInteger(value: string): string {
   return value.replace(/\B(?=(\d{3})+(?!\d))/gu, ',')
@@ -25,7 +25,7 @@ function formatTokensPerRequest(tokens: string | null, requests: string): string
   return `${formatInteger(String(whole))}.${String(fraction).padStart(2, '0')}`
 }
 
-export function presentRankingRow(row: RankingRow) {
+export function presentUsageMetrics<T extends UsageMetrics>(row: T) {
   return {
     ...row,
     costLabel: row.usd === null
@@ -35,9 +35,15 @@ export function presentRankingRow(row: RankingRow) {
     tokensLabel: row.tokens === null
       ? '未知'
       : formatInteger(row.tokens),
-    tokensPerRequestLabel: formatTokensPerRequest(row.tokens, row.requests),
     unknownCostLabel: BigInt(row.unknownCosts) > 0n
       ? `${formatInteger(row.unknownCosts)} 笔费用未知`
       : null,
+  }
+}
+
+export function presentRankingRow(row: RankingRow) {
+  return {
+    ...presentUsageMetrics(row),
+    tokensPerRequestLabel: formatTokensPerRequest(row.tokens, row.requests),
   }
 }
