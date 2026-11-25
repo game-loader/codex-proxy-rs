@@ -41,8 +41,8 @@ use gateway_admin::{
         observability::{
             DashboardObservation, DashboardQuery, DecimalAmount, DiagnosticDimension,
             DiagnosticsObservation, Granularity, OpsError, OpsErrorPage, OpsErrorQuery,
-            RequestMetricPoint, TimeRange, UsageDetail, UsageFilter, UsageListRecord,
-            UsageOverview, UsagePage, UsageQuery, UsageSummaryObservation,
+            RequestHealth, RequestMetricPoint, TimeRange, UsageDetail, UsageFilter,
+            UsageListRecord, UsageOverview, UsagePage, UsageQuery, UsageSummaryObservation,
         },
         provider_credentials::{
             AuthorizationCommit, AuthorizationStarted, CompleteAuthorization, CredentialDetails,
@@ -750,6 +750,8 @@ pub(super) struct MemoryClientKeyStore(Arc<Mutex<Option<ClientKeyRecord>>>);
 
 #[derive(Default)]
 pub(super) struct MemoryObservations {
+    pub global_health: Option<RequestHealth>,
+    pub global_health_ranges: Vec<TimeRange>,
     pub summary: Option<UsageOverview>,
     pub trend: Option<Vec<RequestMetricPoint>>,
     pub concurrency: Vec<gateway_admin::model::observability::UsageConcurrencyPoint>,
@@ -1520,6 +1522,13 @@ impl AccountRuntimeStore for UnusedStore {
 
 #[async_trait]
 impl ObservabilityStore for UnusedStore {
+    async fn global_request_health(&self, range: TimeRange) -> AdminStoreResult<RequestHealth> {
+        let mut data = self.observations.lock().expect("observations");
+        data.global_health_ranges.push(range);
+        data.global_health
+            .ok_or_else(|| unavailable("global request health"))
+    }
+
     async fn diagnostic_errors(
         &self,
         target: &gateway_admin::model::diagnostics::DiagnosticTarget,

@@ -1,0 +1,14 @@
+{
+  "keyStatus": {
+    "title": "服务状态",
+    "successRate": "全局请求成功率",
+    "window": "最近 15 分钟",
+    "healthy": "正常",
+    "degraded": "服务降级",
+    "low": "成功率偏低",
+    "noData": "暂无数据",
+    "loading": "正在加载服务状态",
+    "failed": "无法加载服务状态",
+    "observed": "观测时间"
+  }
+}

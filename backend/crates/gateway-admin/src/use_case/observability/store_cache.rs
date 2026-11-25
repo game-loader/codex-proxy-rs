@@ -204,6 +204,10 @@ impl ObservabilityStore for CachedObservabilityStore {
     async fn analytics_cache_generation(&self) -> AdminStoreResult<u64> {
         self.inner.analytics_cache_generation().await
     }
+    async fn global_request_health(&self, range: TimeRange) -> AdminStoreResult<RequestHealth> {
+        // 实时滑动区间不占用管理查询缓存，也不回用过期结果
+        self.inner.global_request_health(range).await
+    }
     async fn dashboard_summary(
         &self,
         query: DashboardQuery,

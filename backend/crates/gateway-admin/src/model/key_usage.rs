@@ -1,5 +1,7 @@
 //! 单页 Key 用量的查询合同；身份范围不由调用方提供
 
+use chrono::{DateTime, Utc};
+
 use super::{
     client_keys::ClientKeyRecord,
     observability::{
@@ -34,6 +36,11 @@ pub struct KeyUsageOverview {
     pub overview: UsageOverview,
     pub trend: Vec<RequestMetricPoint>,
     pub health_timeline: HealthTimeline,
+}
+
+pub struct KeyUsageStatus {
+    pub success_rate: Option<f64>,
+    pub observed_at: DateTime<Utc>,
 }
 
 pub type KeyUsageRecords = UsagePage;

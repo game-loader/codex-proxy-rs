@@ -9,6 +9,11 @@ export interface KeyUsageConfig {
   plaintextKey: string
 }
 
+export interface KeyUsageStatus {
+  successRate: number | null
+  observedAt: string
+}
+
 export interface KeyUsageMetrics {
   requests: number
   inputTokens: number
@@ -116,6 +121,14 @@ export function getKeyUsageModelCosts(data: KeyUsageQuery, options: RequestOptio
 export function getKeyUsageConfig(options: RequestOptions = {}) {
   return request<KeyUsageConfig>({
     url: '/api/key-usage/config',
+    method: 'GET',
+    ...options,
+  })
+}
+
+export function getKeyUsageStatus(options: RequestOptions = {}) {
+  return request<KeyUsageStatus>({
+    url: '/api/key-usage/status',
     method: 'GET',
     ...options,
   })

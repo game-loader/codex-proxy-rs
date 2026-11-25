@@ -29,7 +29,7 @@ use crate::model::{
     },
     observability::{
         DashboardObservation, DashboardQuery, DiagnosticDimension, DiagnosticsObservation,
-        Granularity, OpsErrorPage, OpsErrorQuery, RequestMetricPoint, TimeRange,
+        Granularity, OpsErrorPage, OpsErrorQuery, RequestHealth, RequestMetricPoint, TimeRange,
         UsageBillingProjection, UsageCalculatedBillingFact, UsageDetail, UsageFilter,
         UsageInsightMetric, UsageInsightsObservation, UsagePage, UsageQuery,
         UsageSummaryObservation,
@@ -493,6 +493,9 @@ pub trait ObservabilityStore: Send + Sync {
 
     /// 缓存必须与删除和后台投影提交的版本一致
     async fn analytics_cache_generation(&self) -> AdminStoreResult<u64>;
+
+    /// 只读取指定区间的全站健康计数
+    async fn global_request_health(&self, range: TimeRange) -> AdminStoreResult<RequestHealth>;
 
     /// 返回历史统计区间和指定观测时刻下的实时账号状态
     async fn dashboard_summary(

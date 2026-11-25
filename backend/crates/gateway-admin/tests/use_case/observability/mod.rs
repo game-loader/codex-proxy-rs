@@ -1218,6 +1218,13 @@ impl FixtureObservabilityStore {
 
 #[async_trait]
 impl ObservabilityStore for FixtureObservabilityStore {
+    async fn global_request_health(
+        &self,
+        _: TimeRange,
+    ) -> AdminStoreResult<gateway_admin::model::observability::RequestHealth> {
+        Err(super::unavailable("global request health"))
+    }
+
     async fn diagnostic_errors(
         &self,
         _target: &gateway_admin::model::diagnostics::DiagnosticTarget,

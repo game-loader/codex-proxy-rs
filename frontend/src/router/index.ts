@@ -3,6 +3,7 @@ import { createRouter, createWebHistory, START_LOCATION } from 'vue-router'
 import { t } from '@/i18n'
 
 import { useAuthStore } from '@/stores/modules/auth'
+import { consumeFeishuStatusReturn } from './feishu-status-return'
 import { routes } from './routes'
 
 export const router = createRouter({
@@ -22,6 +23,14 @@ router.beforeEach(async (to, from) => {
 
   // 登录页不依赖会话恢复；只使用当前已知身份决定是否跳转。
   if (to.meta.guestOnly) {
+    if (from === START_LOCATION && consumeFeishuStatusReturn() && typeof to.query.feishu_error === 'string') {
+      return {
+        name: 'login',
+        query: { ...to.query, redirect: router.resolve({ name: 'key-status' }).fullPath },
+        state: { loginMode: 'key' },
+        replace: true,
+      }
+    }
     if (authStore.session)
       return resolveRoleEntry(authStore.session.role)
     return
@@ -55,4 +64,7 @@ router.beforeEach(async (to, from) => {
   // 两种身份各自进入独立页面，Key 不挂载会请求管理接口的布局。
   if (authStore.session.role !== requiredRole)
     return resolveRoleEntry(authStore.session.role)
+
+  if (from === START_LOCATION && to.name === 'key-usage' && consumeFeishuStatusReturn())
+    return { name: 'key-status', replace: true }
 })

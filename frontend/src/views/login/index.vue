@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { FEISHU_AUTHORIZE_URL, getLoginOptions } from '@/api'
 import AppLanguageMenu from '@/components/AppLanguageMenu.vue'
+import { rememberFeishuStatusReturn } from '@/router/feishu-status-return'
 import { useAuthStore } from '@/stores/modules/auth'
 import { notification } from '@/utils/notification'
 
@@ -62,6 +63,8 @@ onMounted(async () => {
 
 function handleFeishu(): void {
   loginPending.value = true
+  if (router.resolve(resolveDestination()).name === 'key-status')
+    rememberFeishuStatusReturn()
   window.location.assign(FEISHU_AUTHORIZE_URL)
 }
 
@@ -94,10 +97,10 @@ async function handleSubmit(): Promise<void> {
   }
 
   try {
-    if (result.role === 'admin')
-      await router.push(resolveDestination())
-    else
-      await router.push('/key-usage')
+    const destination = resolveDestination()
+    await router.push(result.role === 'admin' || router.resolve(destination).name === 'key-status'
+      ? destination
+      : { name: 'key-usage' })
   }
   finally {
     if (router.currentRoute.value.path === '/login')

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{TimeDelta, Utc};
 
 use crate::{
     AuthService, SystemService,
@@ -12,7 +13,7 @@ use crate::{
         client_keys::ClientKeySecret,
         key_usage::{
             KeyUsageOverview, KeyUsageQuery, KeyUsageRecordKind, KeyUsageRecords,
-            KeyUsageRecordsQuery,
+            KeyUsageRecordsQuery, KeyUsageStatus,
         },
         observability::{
             Granularity, KeyModelCosts, TimeRange, UsageFilter, UsageQuery, UsageRecordStatus,
@@ -43,6 +44,8 @@ pub trait KeyUsageService: Send + Sync {
     ) -> Result<Option<ClientBudgetStatus>, AdminError>;
 
     async fn version(&self, session_id: Option<&str>) -> Result<Option<SystemVersion>, AdminError>;
+
+    async fn status(&self, session_id: Option<&str>) -> Result<Option<KeyUsageStatus>, AdminError>;
 
     async fn config(&self, session_id: Option<&str>)
     -> Result<Option<ClientKeySecret>, AdminError>;
@@ -154,6 +157,25 @@ impl KeyUsageService for DefaultKeyUsageService {
             return Ok(None);
         }
         self.system.version().await.map(Some)
+    }
+
+    async fn status(&self, session_id: Option<&str>) -> Result<Option<KeyUsageStatus>, AdminError> {
+        if self.key_id(session_id).await?.is_none() {
+            return Ok(None);
+        }
+        let observed_at = Utc::now();
+        let health = self
+            .observations
+            .global_request_health(TimeRange {
+                start: observed_at - TimeDelta::minutes(15),
+                end: observed_at,
+            })
+            .await
+            .map_err(|error| map_store_error(error, "key usage status"))?;
+        Ok(Some(KeyUsageStatus {
+            success_rate: health.success_ratio(),
+            observed_at,
+        }))
     }
 
     async fn config(

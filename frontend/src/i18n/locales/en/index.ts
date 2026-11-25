@@ -6,6 +6,7 @@ import dashboard from './dashboard.json'
 import groups from './groups.json'
 import guide from './guide.json'
 import keys from './keys.json'
+import keyStatus from './keyStatus.json'
 import navigation from './navigation.json'
 import plugins from './plugins.json'
 import proxies from './proxies.json'
@@ -24,6 +25,7 @@ export default {
   ...groups,
   ...guide,
   ...keys,
+  ...keyStatus,
   ...navigation,
   ...plugins,
   ...proxies,

@@ -1,0 +1,14 @@
+{
+  "keyStatus": {
+    "title": "服務狀態",
+    "successRate": "全域請求成功率",
+    "window": "最近 15 分鐘",
+    "healthy": "正常",
+    "degraded": "服務降級",
+    "low": "成功率偏低",
+    "noData": "暫無資料",
+    "loading": "正在載入服務狀態",
+    "failed": "無法載入服務狀態",
+    "observed": "觀測時間"
+  }
+}

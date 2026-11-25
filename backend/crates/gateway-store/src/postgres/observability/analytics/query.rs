@@ -3,6 +3,15 @@
 use super::*;
 use futures::TryStreamExt;
 
+const REQUEST_HEALTH_COUNTERS: &[&str] = &[
+    "request_count",
+    "success_count",
+    "failure_count",
+    "cancelled_count",
+    "incomplete_count",
+    "caller_error_count",
+];
+
 pub(crate) struct AnalyticsSnapshot<'a> {
     pub tx: sqlx::Transaction<'a, Postgres>,
     pub(super) status: AnalyticsStatus,
@@ -180,6 +189,29 @@ impl<'a> AnalyticsSnapshot<'a> {
             )
             .await?;
         merge_states(states.into_values())?.request_metrics()
+    }
+
+    pub async fn global_request_health(
+        &mut self,
+        range: ObservabilityRange,
+    ) -> StoreResult<admin_observability::RequestHealth> {
+        let states = self
+            .load_selected(
+                range,
+                &UsageRecordFilter::default(),
+                None,
+                None,
+                Default::default(),
+                ReadSelection {
+                    distributions: DistributionRead::None,
+                    costs: false,
+                    keys: None,
+                    counters: Some(REQUEST_HEALTH_COUNTERS),
+                    distribution_names: None,
+                },
+            )
+            .await?;
+        Ok(merge_states(states.into_values())?.request_health())
     }
 
     pub async fn summary(
@@ -385,14 +417,7 @@ impl<'a> AnalyticsSnapshot<'a> {
             UsageInsightMetric::Cost | UsageInsightMetric::Savings | UsageInsightMetric::Cache
         );
         let counters: &[&str] = match metric {
-            UsageInsightMetric::Health => &[
-                "request_count",
-                "success_count",
-                "failure_count",
-                "cancelled_count",
-                "incomplete_count",
-                "caller_error_count",
-            ],
+            UsageInsightMetric::Health => REQUEST_HEALTH_COUNTERS,
             // 成本视图均显示费用、节省、溢价、单次成功费用与覆盖率汇总
             UsageInsightMetric::Cost | UsageInsightMetric::Savings => &[
                 "request_count",

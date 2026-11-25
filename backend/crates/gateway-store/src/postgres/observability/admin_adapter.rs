@@ -443,6 +443,27 @@ impl PgObservabilityRepository {
 
 #[async_trait]
 impl AdminObservabilityStore for PgAdminObservabilityStore {
+    async fn global_request_health(
+        &self,
+        range: admin_observability::TimeRange,
+    ) -> AdminStoreResult<admin_observability::RequestHealth> {
+        let range = store_range(range).map_err(observability_error)?;
+        self.repository
+            .query_budget
+            .run(
+                &self.repository.pool,
+                "load global request health",
+                |mut connection| async move {
+                    let mut snapshot = analytics::AnalyticsSnapshot::new(&mut connection).await?;
+                    let health = snapshot.global_request_health(range).await?;
+                    snapshot.finish().await?;
+                    Ok(health)
+                },
+            )
+            .await
+            .map_err(observability_error)
+    }
+
     async fn diagnostic_errors(
         &self,
         target: &gateway_admin::model::diagnostics::DiagnosticTarget,

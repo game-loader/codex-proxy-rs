@@ -1191,6 +1191,7 @@ call 与账号的绑定保存在网关进程内，未连接时一小时过期；
 | `GET` | `/api/key-usage/overview` | `period?`、`asOf?` 或 `startTime?`、`endTime?`，另含 `model?` | 用量汇总、趋势、当前额度和锚点所在日期的健康时间线 |
 | `GET` | `/api/key-usage/model-costs` | 同上 | 当前 Key 的[模型费用](#模型费用)，范围取自会话 |
 | `GET` | `/api/key-usage/records` | 同上，另含 `kind?`、`currentPage?`、`pageSize?` | 当前 Key 的请求记录 |
+| `GET` | `/api/key-usage/status` | 无 | 最近 15 分钟的全站服务成功率 |
 | `GET` | `/api/key-usage/config` | 无 | 当前 Key 的客户端配置凭据 |
 | `GET` | `/api/key-usage/version` | 无 | “关于”弹窗使用的当前版本号和提交号 |
 
@@ -1214,6 +1215,12 @@ Token 明细、费用明细、用时/首字与状态。Token 和费用复用现�
 首推理、首文本、总耗时与上游性能指标，口径见[记录范围与统计口径](#记录范围与统计口径)，不含账号容量或调度诊断。
 `status` 为 `success`、`error`、`incomplete`、`cancelled`、`running` 或 `unknown`，`statusCode` 只返回已记录的客户端状态码。
 各结果均保留已采集的 Token/费用明细，缺失时为 null。不返回账号资料、Key ID、上游模型或请求标识、原始错误正文或诊断内容
+
+status 的 `data` 仅包含 `{ successRate, observedAt }`。服务端以 UTC RFC3339 时间 `observedAt` 为结束点，
+统计此前 15 分钟内开始的全站请求，含起点、不含结束点，不接受时间或范围参数
+
+`successRate` 沿用[管理端健康统计口径](#记录范围与统计口径)，返回 0–1 的未取整比例。
+无有效样本时返回 `null`，统计依赖不可用时返回 HTTP 503；仅当有有效样本且全部失败或未完成时返回 0
 
 version 返回 `{ version, gitSha }`，不接受查询参数，不包含部署模式、更新状态或内部诊断
 

@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use gateway_admin::model::{
     client_keys::ClientKeySecret,
-    key_usage::{KeyUsageOverview, KeyUsageRecords},
+    key_usage::{KeyUsageOverview, KeyUsageRecords, KeyUsageStatus},
     observability::{
         CostCoverage, CurrencyCost, Granularity, RequestMetrics, RequestOutcome, UsageListRecord,
     },
@@ -28,6 +28,20 @@ pub(super) fn version(version: SystemVersion) -> VersionView {
     VersionView {
         version: version.version,
         git_sha: version.git_sha,
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct StatusView {
+    success_rate: Option<f64>,
+    observed_at: DateTime<Utc>,
+}
+
+pub(super) fn status(status: KeyUsageStatus) -> StatusView {
+    StatusView {
+        success_rate: status.success_rate,
+        observed_at: status.observed_at,
     }
 }
 

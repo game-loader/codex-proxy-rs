@@ -7,8 +7,10 @@ use axum::{
     http::{Method, StatusCode, header},
     response::Response,
 };
-use chrono::Utc;
-use gateway_admin::model::observability::{RequestMetrics, RequestOutcome, UsageRecordStatus};
+use chrono::{DateTime, TimeDelta, Utc};
+use gateway_admin::model::observability::{
+    RequestHealth, RequestMetrics, RequestOutcome, UsageRecordStatus,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
@@ -40,7 +42,7 @@ async fn login(app: &Router, mode: &str) -> String {
 }
 
 async fn get(app: &Router, resource: &str, suffix: &str, cookie: &str) -> Response {
-    let path = if matches!(resource, "config" | "version") {
+    let path = if matches!(resource, "config" | "status" | "version") {
         format!("/api/key-usage/{resource}{suffix}")
     } else {
         format!("/api/key-usage/{resource}?{RANGE}{suffix}")
@@ -79,6 +81,101 @@ async fn version_exposes_only_build_identifiers_for_key_sessions() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn status_requires_an_enabled_key_browser_session() {
+    let fixture = fixtures::fixture().await;
+    let app = crate::openai::api_router_with_admin(fixture.services.clone());
+    let key = login(&app, "key").await;
+    let expired = login(&app, "key").await;
+    fixture.auth.set_session_expiry(
+        expired.split_once('=').unwrap().1,
+        Utc::now() - TimeDelta::minutes(1),
+    );
+    let admin = login(&app, "admin").await;
+    let admin_key = format!("admin-{}", "a".repeat(64));
+    fixture.auth.set_api_key(&admin_key);
+
+    for (name, value) in [
+        (header::AUTHORIZATION, format!("Bearer {RAW_KEY}")),
+        (axum::http::HeaderName::from_static("x-api-key"), admin_key),
+    ] {
+        let mut request = empty_request(Method::GET, "/api/key-usage/status");
+        request.headers_mut().insert(name, value.parse().unwrap());
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response_json(response).await["code"], 40101);
+    }
+    for cookie in ["", "cpr_session=unknown", &expired] {
+        let response = get(&app, "status", "", cookie).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response_json(response).await["code"], 40101);
+    }
+    let response = get(&app, "status", "", &admin).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response_json(response).await["code"], 40301);
+    let response = app
+        .clone()
+        .oneshot(cookie_request(
+            Method::GET,
+            "/api/admin/key-usage/status",
+            &admin,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    fixture.auth.enabled.store(false, Ordering::SeqCst);
+    let response = get(&app, "status", "", &key).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response_json(response).await["code"], 40101);
+    assert!(
+        fixture
+            .observations
+            .lock()
+            .unwrap()
+            .global_health_ranges
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn status_uses_a_rolling_global_window_and_preserves_unavailable_results() {
+    let fixture = fixtures::fixture().await;
+    let app = crate::openai::api_router_with_admin(fixture.services.clone());
+    let key = login(&app, "key").await;
+    assert_eq!(
+        get(&app, "status", "?startTime=2026-09-01T00:00:00Z", &key)
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    for (health, rate) in [
+        (RequestHealth::from_counts(1, 2, 1, 1, 1), json!(1.0 / 3.0)),
+        (RequestHealth::from_counts(0, 1, 1, 0, 1), Value::Null),
+        (RequestHealth::from_counts(0, 1, 0, 0, 0), json!(0.0)),
+    ] {
+        fixture.observations.lock().unwrap().global_health = Some(health);
+        let before = Utc::now();
+        let response = get(&app, "status", "", &key).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let data = &response_json(response).await["data"];
+        let timestamp = data["observedAt"].as_str().unwrap();
+        assert_eq!(*data, json!({"successRate": rate, "observedAt": timestamp}));
+        let observed_at = timestamp.parse::<DateTime<Utc>>().unwrap();
+        assert!(observed_at >= before && observed_at <= Utc::now());
+        let observations = fixture.observations.lock().unwrap();
+        let range = observations.global_health_ranges.last().unwrap();
+        assert_eq!(range.end, observed_at);
+        assert_eq!(range.end - range.start, TimeDelta::minutes(15));
+    }
+
+    fixture.observations.lock().unwrap().global_health = None;
+    let response = get(&app, "status", "", &key).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response_json(response).await["code"], 50301);
 }
 
 #[tokio::test]

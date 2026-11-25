@@ -29,6 +29,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/key-guide/index.vue'),
   },
   {
+    path: '/status',
+    name: 'key-status',
+    meta: { role: 'key' },
+    component: () => import('@/views/key-status/index.vue'),
+  },
+  {
     path: '/',
     meta: { role: 'admin', defaultEntry: true },
     component: () => import('@/layout/index.vue'),

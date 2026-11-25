@@ -1,0 +1,14 @@
+{
+  "keyStatus": {
+    "title": "Service status",
+    "successRate": "Global success rate",
+    "window": "Rolling last 15 minutes",
+    "healthy": "Healthy",
+    "degraded": "Degraded",
+    "low": "Low success rate",
+    "noData": "No data",
+    "loading": "Loading service status",
+    "failed": "Could not load service status",
+    "observed": "Observed"
+  }
+}

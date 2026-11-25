@@ -10,10 +10,14 @@ export const authPlugin: Plugin = {
     const authStore = useAuthStore(pinia)
 
     async function redirectToLogin(loginMode = authStore.session?.role ?? 'key') {
+      const current = router.currentRoute.value
       authStore.invalidateSession()
-      if (router.currentRoute.value.name !== 'login') {
+      if (current.name !== 'login') {
         await router.replace({
           name: 'login',
+          query: current.name === 'key-status'
+            ? { redirect: current.fullPath }
+            : undefined,
           state: { loginMode },
         })
       }

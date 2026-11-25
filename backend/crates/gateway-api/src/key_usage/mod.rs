@@ -27,6 +27,7 @@ where
 {
     Router::new()
         .route("/api/key-usage/version", get(version::<S>))
+        .route("/api/key-usage/status", get(status::<S>))
         .route("/api/key-usage/config", get(config::<S>))
         .route("/api/key-usage/overview", get(overview::<S>))
         .route("/api/key-usage/model-costs", get(model_costs::<S>))
@@ -55,6 +56,27 @@ where
     Ok(AdminResponse::new(
         StatusCode::OK,
         AdminEnvelope::ok(presenter::version(version)),
+    ))
+}
+
+async fn status<S>(
+    State(state): State<S>,
+    headers: HeaderMap,
+    AdminQuery(_): AdminQuery<query::EmptyQuery>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let status = state
+        .admin_services()
+        .key_usage()
+        .status(session_cookie::value(&headers).as_deref())
+        .await
+        .map_err(map_admin_service_error)?
+        .ok_or_else(AdminError::session_required)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(presenter::status(status)),
     ))
 }
 

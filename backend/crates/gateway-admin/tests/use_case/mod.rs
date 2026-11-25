@@ -835,6 +835,13 @@ impl ClientKeyStore for UnavailableStore {
 
 #[async_trait]
 impl ObservabilityStore for UnavailableStore {
+    async fn global_request_health(
+        &self,
+        _: TimeRange,
+    ) -> AdminStoreResult<gateway_admin::model::observability::RequestHealth> {
+        Err(unavailable("global request health"))
+    }
+
     async fn diagnostic_errors(
         &self,
         _target: &gateway_admin::model::diagnostics::DiagnosticTarget,
